@@ -25,6 +25,7 @@ fn configure() -> Result<App, Box<dyn Error>> {
     let widget_large_enabled = true;
     let widget_medium_enabled = true;
     let widget_small_enabled = true;
+    let desktop_background_opacity = 0.12;
     let sampling = if desktop_enabled {
         Duration::from_secs(5)
     } else {
@@ -212,9 +213,9 @@ fn configure() -> Result<App, Box<dyn Error>> {
                     ),
                 ],
             ))
-            .position(270.0, 0.0)
+            .position(0.0, 0.0)
             .width(480.0)
-            .background_opacity(0.0)
+            .background_opacity(desktop_background_opacity)
             .click_through(true),
         );
     }
