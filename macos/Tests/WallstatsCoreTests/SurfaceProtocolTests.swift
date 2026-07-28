@@ -8,7 +8,7 @@ struct SurfaceProtocolTests {
     func surfaceRoundTrip() throws {
         let data = Data(#"""
         [
-          {"kind":"desktop","root":{"kind":"stack","gap":4.0,"children":[{"kind":"widget","widget":{"kind":"value","label":"CPU","metric":"cpu","format":"percent"}}]},"x":270.0,"y":0.0,"width":400.0,"background_opacity":0.0,"click_through":true},
+          {"kind":"desktop","root":{"kind":"stack","gap":4.0,"children":[{"kind":"widget","widget":{"kind":"value","label":"CPU","metric":"cpu","format":"percent"}}]},"x":32.0,"y":32.0,"origin":"bottom_left","width":400.0,"background_opacity":0.0,"click_through":true},
           {"kind":"widget_medium","root":{"kind":"split","gap":6.0,"minimum_track_width":120.0,"tracks":[{"weight":2.0,"child":{"kind":"widget","widget":{"kind":"value","label":"CPU","metric":"cpu","format":"percent"}}},{"weight":1.0,"child":{"kind":"widget","widget":{"kind":"compact_status","label":"Backup","metric":"backup","format":"compact_status"}}}]}}
         ]
         """#.utf8)
@@ -19,6 +19,14 @@ struct SurfaceProtocolTests {
             [SurfacePlan].self,
             from: JSONEncoder().encode(surfaces)
         ) == surfaces)
+    }
+
+    @Test("Desktop surfaces without an origin retain legacy top-left placement")
+    func legacyDesktopOrigin() throws {
+        let data = Data(#"{"kind":"desktop","root":{"kind":"widget","widget":{"kind":"value","label":"CPU","metric":"cpu","format":"percent"}},"x":0,"y":0,"width":400,"background_opacity":0,"click_through":true}"#.utf8)
+        let surface = try JSONDecoder().decode(SurfacePlan.self, from: data)
+
+        #expect(surface.origin == .topLeft)
     }
 
     @Test("Old plans decode with no surfaces")
@@ -48,7 +56,7 @@ struct SurfaceProtocolTests {
                 SurfacePlan(kind: .widgetSmall, root: leaf),
                 SurfacePlan(kind: .widgetSmall, root: leaf),
             ],
-            [SurfacePlan(kind: .desktop, root: leaf, x: 0, y: 0, width: 0, backgroundOpacity: 0, clickThrough: true)],
+            [SurfacePlan(kind: .desktop, root: leaf, x: 0, y: 0, origin: .bottomLeft, width: 0, backgroundOpacity: 0, clickThrough: true)],
             [SurfacePlan(kind: .widgetMedium, root: .stack(gap: -.infinity, children: [leaf]))],
             [SurfacePlan(kind: .widgetMedium, root: .stack(gap: 0, children: []))],
             [SurfacePlan(kind: .widgetMedium, root: .split(

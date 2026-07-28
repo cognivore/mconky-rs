@@ -68,9 +68,10 @@ final class DashboardPanelController: NSObject {
     private func applySurface() {
         guard surface.kind == .desktop,
               let screen = NSScreen.main ?? NSScreen.screens.first,
-              let configuredWidth = surface.width,
-              let configuredX = surface.x,
-              let configuredY = surface.y
+               let configuredWidth = surface.width,
+               let configuredX = surface.x,
+               let configuredY = surface.y,
+               let origin = surface.origin
         else {
             hide()
             return
@@ -86,6 +87,7 @@ final class DashboardPanelController: NSObject {
             height: height,
             x: CGFloat(configuredX),
             y: CGFloat(configuredY),
+            origin: origin,
             screenFrame: screenFrame,
             visibleFrame: visible
         )
@@ -115,11 +117,26 @@ enum DesktopSurfacePlacement {
         height: CGFloat,
         x: CGFloat,
         y: CGFloat,
+        origin: SurfaceOrigin,
         screenFrame: NSRect,
         visibleFrame: NSRect
     ) -> NSRect {
-        let desiredX = screenFrame.minX + x
-        let desiredY = screenFrame.minY + y
+        let desiredX: CGFloat
+        let desiredY: CGFloat
+        switch origin {
+        case .bottomLeft:
+            desiredX = screenFrame.minX + x
+            desiredY = screenFrame.minY + y
+        case .topLeft:
+            desiredX = screenFrame.minX + x
+            desiredY = screenFrame.maxY - y - height
+        case .bottomRight:
+            desiredX = screenFrame.maxX - x - width
+            desiredY = screenFrame.minY + y
+        case .topRight:
+            desiredX = screenFrame.maxX - x - width
+            desiredY = screenFrame.maxY - y - height
+        }
         let origin = NSPoint(
             x: min(max(desiredX, visibleFrame.minX), visibleFrame.maxX - width),
             y: min(max(desiredY, visibleFrame.minY), visibleFrame.maxY - height)

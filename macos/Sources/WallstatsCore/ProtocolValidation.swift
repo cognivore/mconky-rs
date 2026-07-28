@@ -441,18 +441,20 @@ public enum ProtocolValidator {
         case .desktop:
             guard let x = surface.x, x.isFinite,
                   let y = surface.y, y.isFinite,
+                  surface.origin != nil,
                   let width = surface.width, width.isFinite, width > 0,
                   let opacity = surface.backgroundOpacity,
                   opacity.isFinite, (0 ... 1).contains(opacity),
                   surface.clickThrough != nil
             else {
                 throw ProtocolValidationError.invalidSurface(
-                    "desktop geometry must be complete, finite, and nonnegative"
+                    "desktop geometry must be complete and finite"
                 )
             }
         case .widgetLarge, .widgetMedium, .widgetSmall:
             guard surface.x == nil,
                   surface.y == nil,
+                  surface.origin == nil,
                   surface.width == nil,
                   surface.backgroundOpacity == nil,
                   surface.clickThrough == nil

@@ -19,6 +19,20 @@ pub enum SurfaceKind {
     WidgetSmall,
 }
 
+/// Screen corner used as the origin for desktop surface coordinates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceOrigin {
+    /// X moves right and Y moves up from the bottom-left.
+    BottomLeft,
+    /// X moves right and Y moves down from the top-left.
+    TopLeft,
+    /// X moves left and Y moves up from the bottom-right.
+    BottomRight,
+    /// X moves left and Y moves down from the top-right.
+    TopRight,
+}
+
 /// An independently composed Wallstats surface.
 #[derive(Clone, Debug, Serialize)]
 pub struct Surface {
@@ -28,6 +42,8 @@ pub struct Surface {
     x: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     y: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    origin: Option<SurfaceOrigin>,
     #[serde(skip_serializing_if = "Option::is_none")]
     width: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -44,6 +60,7 @@ impl Surface {
             root,
             x: Some(0.0),
             y: Some(0.0),
+            origin: Some(SurfaceOrigin::BottomLeft),
             width: Some(480.0),
             background_opacity: Some(0.0),
             click_through: Some(true),
@@ -71,16 +88,18 @@ impl Surface {
             root,
             x: None,
             y: None,
+            origin: None,
             width: None,
             background_opacity: None,
             click_through: None,
         }
     }
 
-    /// Sets signed desktop coordinates from the main-screen bottom-left.
-    pub fn position(mut self, x: f64, y: f64) -> Self {
+    /// Sets inward desktop offsets from the selected main-screen corner.
+    pub fn position(mut self, x: f64, y: f64, origin: SurfaceOrigin) -> Self {
         self.x = Some(x);
         self.y = Some(y);
+        self.origin = Some(origin);
         self
     }
 
@@ -112,6 +131,11 @@ impl Surface {
             SurfaceKind::Desktop => {
                 validate_finite(self.x, "desktop x")?;
                 validate_finite(self.y, "desktop y")?;
+                if self.origin.is_none() {
+                    return Err(ConfigError::InvalidLayout(
+                        "desktop origin is missing".to_owned(),
+                    ));
+                }
                 let width = self.width.ok_or_else(|| {
                     ConfigError::InvalidLayout("desktop width is missing".to_owned())
                 })?;
@@ -137,6 +161,7 @@ impl Surface {
             _ => {
                 if self.x.is_some()
                     || self.y.is_some()
+                    || self.origin.is_some()
                     || self.width.is_some()
                     || self.background_opacity.is_some()
                     || self.click_through.is_some()
@@ -432,7 +457,7 @@ fn validate_dimension(value: f64, name: &str) -> Result<(), ConfigError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Insets, LayoutNode, LayoutTrack, Surface};
+    use super::{Insets, LayoutNode, LayoutTrack, Surface, SurfaceOrigin};
     use crate::{CompactStatus, CompactStatusWidget, Metric, MetricId, Ratio, Stat};
     use serde_json::json;
     use std::collections::HashSet;
@@ -448,7 +473,7 @@ mod tests {
                 4.0,
                 vec![LayoutNode::widget(cpu_widget.clone())],
             ))
-            .position(270.0, 0.0)
+            .position(32.0, 32.0, SurfaceOrigin::BottomLeft)
             .width(400.0)
             .background_opacity(0.0)
             .click_through(true),
@@ -475,7 +500,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(surfaces).unwrap(),
             json!([
-                {"kind":"desktop","root":{"kind":"stack","gap":4.0,"children":[{"kind":"widget","widget":{"kind":"value","label":"CPU","metric":"cpu","format":"percent"}}]},"x":270.0,"y":0.0,"width":400.0,"background_opacity":0.0,"click_through":true},
+                {"kind":"desktop","root":{"kind":"stack","gap":4.0,"children":[{"kind":"widget","widget":{"kind":"value","label":"CPU","metric":"cpu","format":"percent"}}]},"x":32.0,"y":32.0,"origin":"bottom_left","width":400.0,"background_opacity":0.0,"click_through":true},
                 {"kind":"widget_large","root":{"kind":"section","title":"Perf","insets":{"top":8.0,"right":8.0,"bottom":8.0,"left":8.0},"child":{"kind":"widget","widget":{"kind":"value","label":"CPU","metric":"cpu","format":"percent"}}}},
                 {"kind":"widget_medium","root":{"kind":"split","gap":6.0,"minimum_track_width":120.0,"tracks":[{"weight":2.0,"child":{"kind":"widget","widget":{"kind":"value","label":"CPU","metric":"cpu","format":"percent"}}},{"weight":1.0,"child":{"kind":"widget","widget":{"kind":"compact_status","label":"Backup","metric":"backup","format":"compact_status"}}}]}},
                 {"kind":"widget_small","root":{"kind":"flow","horizontal_gap":3.0,"vertical_gap":4.0,"minimum_item_width":80.0,"children":[{"kind":"widget","widget":{"kind":"compact_status","label":"Backup","metric":"backup","format":"compact_status"}}]}}

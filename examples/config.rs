@@ -14,7 +14,7 @@ use std::time::Duration;
 use wallstats::{
     App, CollectError, CompactStatus, CompactStatusValue, CompactStatusWidget, DiskIoCollector,
     Gauge, Insets, LayoutNode, LayoutTrack, MacmonCollector, Plot, PlotSeries, Schedule, Stat,
-    StatusLight, Surface, SystemCollector, TableWidget, TextFileSet, Widget, Window,
+    StatusLight, Surface, SurfaceOrigin, SystemCollector, TableWidget, TextFileSet, Widget, Window,
 };
 
 fn configure() -> Result<App, Box<dyn Error>> {
@@ -213,7 +213,7 @@ fn configure() -> Result<App, Box<dyn Error>> {
                     ),
                 ],
             ))
-            .position(0.0, 0.0)
+            .position(32.0, 32.0, SurfaceOrigin::BottomLeft)
             .width(480.0)
             .background_opacity(desktop_background_opacity)
             .click_through(true),

@@ -28,7 +28,7 @@ pub use collector::{
 pub use disk_io::{DiskIoCollector, DiskIoMetrics};
 pub use error::{ConfigError, Error, Result};
 pub use id::{MetricId, MetricIdError};
-pub use layout::{Insets, LayoutNode, LayoutTrack, Surface, SurfaceKind};
+pub use layout::{Insets, LayoutNode, LayoutTrack, Surface, SurfaceKind, SurfaceOrigin};
 pub use macmon::{MacmonCollector, MacmonMetrics};
 pub use metric::{
     Boolean, Bytes, BytesPerSecond, CompactStatus, CompactStatusValue, CompactStatusValueError,
@@ -48,7 +48,7 @@ pub use widget::{
 pub const PROTOCOL_MAJOR: u32 = 1;
 
 /// The protocol minor version emitted by this crate.
-pub const PROTOCOL_MINOR: u32 = 0;
+pub const PROTOCOL_MINOR: u32 = 1;
 
 /// The SDK version reported in the protocol `hello` record.
 pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");

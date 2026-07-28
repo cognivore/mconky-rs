@@ -50,12 +50,14 @@ minimum height, and then packs the result. A split that cannot satisfy its track
 widths re-homes those tracks to a source-ordered vertical stack. Runtime metric
 values never affect geometry.
 
-The desktop surface is the Conky-like overlay. Its signed `x`/`y` position is
-measured from the main screen's bottom-left and its configured `width` drives the
-width-first solve; the natural AST height determines the panel height. The
-current example uses `.position(0.0, 0.0).width(480.0)`, a subtle 12%-opaque
-black background, and click-through input. WidgetKit receives separate large,
-medium, and small roots built from the same node types.
+The desktop surface is the Conky-like overlay. Its `position(x, y, origin)` uses
+inward offsets from `BottomLeft`, `TopLeft`, `BottomRight`, or `TopRight`; the
+selected corner determines both the placement of `(0, 0)` and the axis
+directions. Its configured `width` drives the width-first solve, and the natural
+AST height determines the panel height. The current example uses
+`.position(32.0, 32.0, SurfaceOrigin::BottomLeft).width(480.0)`, a subtle
+12%-opaque black background, and click-through input. WidgetKit receives
+separate large, medium, and small roots built from the same node types.
 
 The renderer remains shape-first and omits versions, protocol details, and
 status prose. Generic compact-status metrics render configured glyphs, a
@@ -186,7 +188,7 @@ let mut surfaces = Vec::new();
 if desktop_enabled {
     surfaces.push(
         Surface::desktop(LayoutNode::stack(10.0, vec![perf.clone()]))
-            .position(0.0, 0.0)
+            .position(32.0, 32.0, SurfaceOrigin::BottomLeft)
             .width(480.0)
             .background_opacity(0.12)
             .click_through(true),

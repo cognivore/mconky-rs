@@ -7,6 +7,13 @@ public enum SurfaceKind: String, Codable, CaseIterable, Equatable, Sendable {
     case widgetSmall = "widget_small"
 }
 
+public enum SurfaceOrigin: String, Codable, CaseIterable, Equatable, Sendable {
+    case bottomLeft = "bottom_left"
+    case topLeft = "top_left"
+    case bottomRight = "bottom_right"
+    case topRight = "top_right"
+}
+
 public struct LayoutInsets: Codable, Equatable, Sendable {
     public let top: Double
     public let right: Double
@@ -135,6 +142,7 @@ public struct SurfacePlan: Codable, Equatable, Sendable {
     public let root: LayoutNode
     public let x: Double?
     public let y: Double?
+    public let origin: SurfaceOrigin?
     public let width: Double?
     public let backgroundOpacity: Double?
     public let clickThrough: Bool?
@@ -144,6 +152,7 @@ public struct SurfacePlan: Codable, Equatable, Sendable {
         root: LayoutNode,
         x: Double? = nil,
         y: Double? = nil,
+        origin: SurfaceOrigin? = nil,
         width: Double? = nil,
         backgroundOpacity: Double? = nil,
         clickThrough: Bool? = nil
@@ -152,6 +161,7 @@ public struct SurfacePlan: Codable, Equatable, Sendable {
         self.root = root
         self.x = x
         self.y = y
+        self.origin = origin
         self.width = width
         self.backgroundOpacity = backgroundOpacity
         self.clickThrough = clickThrough
@@ -162,9 +172,35 @@ public struct SurfacePlan: Codable, Equatable, Sendable {
         case root
         case x
         case y
+        case origin
         case width
         case backgroundOpacity = "background_opacity"
         case clickThrough = "click_through"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(SurfaceKind.self, forKey: .kind)
+        root = try container.decode(LayoutNode.self, forKey: .root)
+        x = try container.decodeIfPresent(Double.self, forKey: .x)
+        y = try container.decodeIfPresent(Double.self, forKey: .y)
+        origin = try container.decodeIfPresent(SurfaceOrigin.self, forKey: .origin)
+            ?? (kind == .desktop ? .topLeft : nil)
+        width = try container.decodeIfPresent(Double.self, forKey: .width)
+        backgroundOpacity = try container.decodeIfPresent(Double.self, forKey: .backgroundOpacity)
+        clickThrough = try container.decodeIfPresent(Bool.self, forKey: .clickThrough)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(root, forKey: .root)
+        try container.encodeIfPresent(x, forKey: .x)
+        try container.encodeIfPresent(y, forKey: .y)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(width, forKey: .width)
+        try container.encodeIfPresent(backgroundOpacity, forKey: .backgroundOpacity)
+        try container.encodeIfPresent(clickThrough, forKey: .clickThrough)
     }
 }
 
