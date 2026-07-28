@@ -1,0 +1,1 @@
+{"type":"plan","title":"Duplicate","metrics":[{"id":"cpu.total","value_type":"ratio","stale_after_ms":3000},{"id":"cpu.total","value_type":"ratio","stale_after_ms":3000}],"window":{"width":420,"anchor":"top_right","margin":20,"layer":"desktop","opacity":0.94},"sections":[]}

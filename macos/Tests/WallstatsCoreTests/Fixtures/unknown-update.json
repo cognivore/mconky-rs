@@ -1,0 +1,1 @@
+{"type":"update","sequence":3,"timestamp_ms":1785168006123,"values":[{"metric":"cpu.missing","value":{"kind":"ratio","value":0.5}}]}

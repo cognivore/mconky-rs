@@ -1,0 +1,262 @@
+#!/bin/bash
+set -euo pipefail
+
+if [[ -z "${HOME:-}" ]]; then
+    echo "wallstats: HOME must be set" >&2
+    exit 1
+fi
+
+label=com.memorici.wallstats
+widget_identifier=com.memorici.wallstats.widget
+user_id="$(/usr/bin/id -u)"
+service="gui/$user_id/$label"
+app_path="$HOME/Applications/Wallstats.app"
+app_executable="$app_path/Contents/MacOS/Wallstats"
+widget_path="$app_path/Contents/PlugIns/WallstatsWidgetExtension.appex"
+helper_path="$app_path/Contents/Helpers/wallstats-rust-script"
+config_path="$HOME/.config/wallstats/config.rs"
+snapshot_path="$HOME/Library/Group Containers/22GNLKBRMV.com.memorici.wallstats/Library/Application Support/Wallstats/widget-snapshot-v1.plist"
+stdout_log="$HOME/Library/Logs/wallstats.out.log"
+stderr_log="$HOME/Library/Logs/wallstats.err.log"
+open_bin="${WALLSTATS_OPEN_BIN:-/usr/bin/open}"
+dry_run="${WALLSTATS_CLI_DRY_RUN:-0}"
+companion_pid=
+companion_path=
+
+case "$dry_run" in
+    0 | 1) ;;
+    *)
+        echo "wallstats: WALLSTATS_CLI_DRY_RUN must be 0 or 1" >&2
+        exit 1
+        ;;
+esac
+
+usage() {
+    /bin/cat <<'USAGE'
+Usage: wallstats COMMAND
+
+Commands:
+  reload        Recompile config and wait for a new widget snapshot
+  refresh       Ask WidgetKit to refresh the current snapshot
+  config        Open the active Wallstats configuration
+  status        Show companion, widget, config, and snapshot status
+  check-config  Compile and validate the Wallstats configuration
+  help          Show this help
+USAGE
+}
+
+fail() {
+    echo "wallstats: $*" >&2
+    exit 1
+}
+
+usage_error() {
+    echo "wallstats: $*" >&2
+    usage >&2
+    exit 64
+}
+
+require_no_arguments() {
+    [[ $# -eq 0 ]] || usage_error "this command takes no arguments"
+}
+
+process_path() {
+    local process_id=$1
+    local path
+    path="$(/bin/ps -p "$process_id" -o comm=)"
+    path="${path#"${path%%[![:space:]]*}"}"
+    printf '%s\n' "$path"
+}
+
+require_companion() {
+    local service_output process_ids process_id
+
+    [[ -x "$app_executable" ]] || fail \
+        "app is unavailable at $app_path; run ./scripts/install.sh from the Wallstats checkout"
+    if ! service_output="$(/bin/launchctl print "$service" 2>&1)"; then
+        echo "$service_output" >&2
+        fail "LaunchAgent $label is not loaded; run ./scripts/install.sh again"
+    fi
+
+    companion_pid="$(printf '%s\n' "$service_output" \
+        | /usr/bin/awk '$1 == "pid" && $2 == "=" { print $3; exit }')"
+    [[ "$companion_pid" =~ ^[0-9]+$ ]] || fail "LaunchAgent has no running PID"
+    [[ "$service_output" == *"state = running"* ]] || fail "LaunchAgent is not running"
+
+    process_ids=()
+    while IFS= read -r process_id; do
+        [[ -n "$process_id" ]] && process_ids+=("$process_id")
+    done < <(/usr/bin/pgrep -u "$user_id" -x Wallstats 2>/dev/null || true)
+    [[ ${#process_ids[@]} -eq 1 ]] || fail \
+        "expected one Wallstats process, found ${#process_ids[@]}; reinstall to repair supervision"
+    [[ "${process_ids[0]}" == "$companion_pid" ]] || fail \
+        "LaunchAgent PID does not match the running Wallstats process"
+
+    companion_path="$(process_path "$companion_pid")"
+    [[ "$companion_path" == "$app_executable" ]] || fail \
+        "LaunchAgent runs $companion_path instead of stable path $app_executable"
+}
+
+open_url() {
+    local url=$1
+
+    if [[ "$dry_run" == 1 ]]; then
+        echo "Dry run: $url"
+        return
+    fi
+    [[ -x "$open_bin" ]] || fail "URL opener is not executable: $open_bin"
+    "$open_bin" -g "$url" || fail "could not send $url through Launch Services"
+}
+
+snapshot_hash() {
+    local hash
+
+    if [[ ! -f "$snapshot_path" ]]; then
+        printf '%s\n' missing
+        return
+    fi
+    if ! hash="$(/usr/bin/shasum -a 256 "$snapshot_path" 2>/dev/null \
+        | /usr/bin/awk '{ print $1 }')"; then
+        printf '%s\n' unreadable
+        return
+    fi
+    if [[ -z "$hash" ]]; then
+        printf '%s\n' unreadable
+    else
+        printf '%s\n' "$hash"
+    fi
+}
+
+reload_command() {
+    local initial_hash current_hash
+
+    if [[ "$dry_run" == 1 ]]; then
+        open_url wallstats://reload
+        echo "Dry run: would wait for a changed widget snapshot."
+        return
+    fi
+    require_companion
+    initial_hash="$(snapshot_hash)"
+    open_url wallstats://reload
+
+    for _ in {1..120}; do
+        /bin/sleep 1
+        current_hash="$(snapshot_hash)"
+        if [[ "$current_hash" != missing \
+            && "$current_hash" != unreadable \
+            && "$current_hash" != "$initial_hash" ]]; then
+            echo "Wallstats reloaded; widget snapshot updated."
+            return
+        fi
+    done
+
+    current_hash="$(snapshot_hash)"
+    echo "wallstats: reload timed out after 120 seconds" >&2
+    echo "  companion: PID $companion_pid at $companion_path" >&2
+    echo "  snapshot: $snapshot_path" >&2
+    echo "  initial hash: $initial_hash" >&2
+    echo "  current hash: $current_hash" >&2
+    echo "  logs: $stdout_log and $stderr_log" >&2
+    echo "  run 'wallstats check-config' to inspect compiler errors" >&2
+    exit 1
+}
+
+refresh_command() {
+    if [[ "$dry_run" != 1 ]]; then
+        require_companion
+    fi
+    open_url wallstats://refresh
+    echo "Widget refresh requested."
+}
+
+config_command() {
+    if [[ "$dry_run" != 1 ]]; then
+        require_companion
+    fi
+    open_url wallstats://config
+}
+
+status_command() {
+    local plugin_listing sampled_at schema_version compact_status_count metric_count metric_index metric_kind
+
+    require_companion
+    echo "LaunchAgent: PID $companion_pid"
+    echo "Executable: $companion_path"
+
+    plugin_listing="$(/usr/bin/pluginkit -m -A -D -v -i "$widget_identifier")"
+    if [[ "$plugin_listing" != *"$widget_identifier"* \
+        || "$plugin_listing" != *"$widget_path"* ]]; then
+        fail "widget extension is not registered at $widget_path; run ./scripts/install.sh again"
+    fi
+    echo "Widget: registered at $widget_path"
+
+    if [[ -f "$config_path" ]]; then
+        echo "Config: $config_path"
+    else
+        echo "Config: missing at $config_path"
+    fi
+
+    if [[ ! -f "$snapshot_path" ]]; then
+        fail "snapshot is missing at $snapshot_path; inspect $stderr_log"
+    fi
+    /usr/bin/plutil -lint "$snapshot_path" >/dev/null \
+        || fail "snapshot is not a valid property list: $snapshot_path"
+    sampled_at="$(/usr/bin/plutil -extract t raw -o - "$snapshot_path")"
+    schema_version="$(/usr/bin/plutil -extract v raw -o - "$snapshot_path")"
+    metric_count="$(/usr/bin/plutil -extract m raw -o - "$snapshot_path")"
+    compact_status_count=0
+    for ((metric_index = 0; metric_index < metric_count; metric_index++)); do
+        metric_kind="$(/usr/bin/plutil -extract "m.$metric_index.k" raw -o - "$snapshot_path")"
+        if [[ "$metric_kind" == compact_status ]]; then
+            compact_status_count=$((compact_status_count + 1))
+        fi
+    done
+    echo "Snapshot: schema $schema_version, sampled $sampled_at, compact statuses $compact_status_count"
+}
+
+check_config_command() {
+    [[ -x "$helper_path" ]] || fail \
+        "embedded Nix helper is unavailable at $helper_path; reinstall Wallstats"
+    [[ -f "$config_path" ]] || fail "configuration is missing: $config_path"
+
+    (
+        cd "$(/usr/bin/dirname "$config_path")"
+        "$helper_path" --force "$config_path" -- --check >/dev/null
+    )
+    echo "Configuration check passed."
+}
+
+command=${1:-help}
+if [[ $# -gt 0 ]]; then
+    shift
+fi
+
+case "$command" in
+    reload)
+        require_no_arguments "$@"
+        reload_command
+        ;;
+    refresh)
+        require_no_arguments "$@"
+        refresh_command
+        ;;
+    config)
+        require_no_arguments "$@"
+        config_command
+        ;;
+    status)
+        require_no_arguments "$@"
+        status_command
+        ;;
+    check-config)
+        require_no_arguments "$@"
+        check_config_command
+        ;;
+    help | -h | --help)
+        require_no_arguments "$@"
+        usage
+        ;;
+    *)
+        usage_error "unknown command: $command"
+        ;;
+esac

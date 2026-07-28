@@ -1,0 +1,14 @@
+/.direnv/
+/target/
+/macos/.build/
+/macos/DerivedData/
+/macos/Wallstats.xcodeproj/
+/Wallstats.app/
+/.wallstats-app.*/
+/.wallstats-install.*/
+/result
+/result-*
+/nix-runtime
+
+.DS_Store
+*.log

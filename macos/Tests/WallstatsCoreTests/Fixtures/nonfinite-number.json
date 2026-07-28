@@ -1,0 +1,1 @@
+{"type":"update","sequence":3,"timestamp_ms":1785168006123,"values":[{"metric":"temperature","value":{"kind":"number","value":1e999}}]}

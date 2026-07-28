@@ -1,0 +1,89 @@
+name: Wallstats
+
+# The scripts supply this absolute path because the generated project lives in a temporary directory.
+options:
+  minimumXcodeGenVersion: 2.44.1
+  xcodeVersion: "26.4"
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+  defaultConfig: Release
+
+packages:
+  WallstatsPackage:
+    path: "${WALLSTATS_MACOS_ROOT}"
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: 22GNLKBRMV
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: "YES"
+    CODE_SIGN_STYLE: Manual
+    CURRENT_PROJECT_VERSION: "6"
+    MARKETING_VERSION: "0.1.0"
+
+targets:
+  Wallstats:
+    type: application
+    platform: macOS
+    sources:
+      - path: "${WALLSTATS_MACOS_ROOT}/Sources/Wallstats"
+    dependencies:
+      - package: WallstatsPackage
+        product: WallstatsCore
+      - sdk: AppKit.framework
+      - sdk: SwiftUI.framework
+      - sdk: WidgetKit.framework
+      - target: WallstatsWidgetExtension
+        embed: true
+        codeSign: true
+        copy:
+          destination: plugins
+    settings:
+      base:
+        PRODUCT_NAME: Wallstats
+        PRODUCT_BUNDLE_IDENTIFIER: com.memorici.wallstats
+        INFOPLIST_FILE: "${WALLSTATS_MACOS_ROOT}/Support/Wallstats-Info.plist"
+        CODE_SIGN_ENTITLEMENTS: "${WALLSTATS_MACOS_ROOT}/Support/Wallstats.entitlements"
+        GENERATE_INFOPLIST_FILE: "NO"
+        ENABLE_APP_SANDBOX: "NO"
+        SKIP_INSTALL: "NO"
+
+  WallstatsWidgetExtension:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: "${WALLSTATS_MACOS_ROOT}/Sources/WallstatsWidget"
+    dependencies:
+      - package: WallstatsPackage
+        product: WallstatsCore
+      - sdk: SwiftUI.framework
+      - sdk: WidgetKit.framework
+    settings:
+      base:
+        PRODUCT_NAME: WallstatsWidgetExtension
+        PRODUCT_BUNDLE_IDENTIFIER: com.memorici.wallstats.widget
+        INFOPLIST_FILE: "${WALLSTATS_MACOS_ROOT}/Support/WallstatsWidget-Info.plist"
+        CODE_SIGN_ENTITLEMENTS: "${WALLSTATS_MACOS_ROOT}/Support/WallstatsWidget.entitlements"
+        GENERATE_INFOPLIST_FILE: "NO"
+        APPLICATION_EXTENSION_API_ONLY: "YES"
+        ENABLE_APP_SANDBOX: "YES"
+        SKIP_INSTALL: "YES"
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks"
+
+schemes:
+  Wallstats:
+    build:
+      targets:
+        Wallstats: all
+        WallstatsWidgetExtension: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
