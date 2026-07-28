@@ -81,18 +81,20 @@ final class DashboardPanelController: NSObject {
         let width = min(max(CGFloat(configuredWidth), 1), visible.width)
         let layout = EditorialLayoutSolver.solve(root: surface.root, width: width)
         let height = min(max(CGFloat(layout.resolvedHeight), 1), visible.height)
-        let desiredX = screenFrame.minX + CGFloat(configuredX)
-        let desiredY = screenFrame.maxY - CGFloat(configuredY) - height
-        let origin = NSPoint(
-            x: min(max(desiredX, visible.minX), visible.maxX - width),
-            y: min(max(desiredY, visible.minY), visible.maxY - height)
+        let frame = DesktopSurfacePlacement.frame(
+            width: width,
+            height: height,
+            x: CGFloat(configuredX),
+            y: CGFloat(configuredY),
+            screenFrame: screenFrame,
+            visibleFrame: visible
         )
 
         panel.ignoresMouseEvents = surface.clickThrough ?? true
         panel.backgroundColor = NSColor.black.withAlphaComponent(
             CGFloat(surface.backgroundOpacity ?? 0)
         )
-        panel.setFrame(NSRect(origin: origin, size: NSSize(width: width, height: height)), display: true)
+        panel.setFrame(frame, display: true)
 
         let rootView = DesktopSurfaceView(model: model, surface: surface)
         if let hostingView {
@@ -104,5 +106,24 @@ final class DashboardPanelController: NSObject {
             self.hostingView = hostingView
         }
         show()
+    }
+}
+
+enum DesktopSurfacePlacement {
+    static func frame(
+        width: CGFloat,
+        height: CGFloat,
+        x: CGFloat,
+        y: CGFloat,
+        screenFrame: NSRect,
+        visibleFrame: NSRect
+    ) -> NSRect {
+        let desiredX = screenFrame.minX + x
+        let desiredY = screenFrame.minY + y
+        let origin = NSPoint(
+            x: min(max(desiredX, visibleFrame.minX), visibleFrame.maxX - width),
+            y: min(max(desiredY, visibleFrame.minY), visibleFrame.maxY - height)
+        )
+        return NSRect(origin: origin, size: NSSize(width: width, height: height))
     }
 }

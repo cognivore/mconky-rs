@@ -99,10 +99,10 @@ struct EditorialLayoutSolverTests {
         let root = LayoutNode.stack(gap: 6, children: [value("a"), value("b")])
         let natural = EditorialLayoutSolver.solve(root: root, width: 100)
         let grown = EditorialLayoutSolver.solve(root: root, width: 100, boundedHeight: 74)
-        let shrunk = EditorialLayoutSolver.solve(root: root, width: 100, boundedHeight: 44)
-        let overflow = EditorialLayoutSolver.solve(root: root, width: 100, boundedHeight: 30)
+        let shrunk = EditorialLayoutSolver.solve(root: root, width: 100, boundedHeight: 48)
+        let overflow = EditorialLayoutSolver.solve(root: root, width: 100, boundedHeight: 40)
 
-        #expect(natural.naturalHeight == 54)
+        #expect(natural.naturalHeight == 58)
         #expect(grown.placements[0].allocationFrame.height > natural.placements[0].allocationFrame.height)
         #expect(shrunk.overflow == false)
         #expect(shrunk.placements[0].allocationFrame.height < natural.placements[0].allocationFrame.height)

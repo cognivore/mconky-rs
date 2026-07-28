@@ -57,7 +57,7 @@ public struct EditorialLayoutResult: Equatable, Sendable {
 }
 
 public enum EditorialLayoutSolver {
-    private static let sectionChromeHeight = 12.0
+    private static let sectionChromeHeight = 14.0
 
     public static func solve(
         root: LayoutNode,
@@ -170,17 +170,17 @@ public enum EditorialLayoutSolver {
     private static func widgetBounds(_ kind: WidgetKind) -> FlexBounds {
         switch kind {
         case .value:
-            FlexBounds(minimum: 18, preferred: 24, maximum: 34, grow: 0.5, shrink: 1)
+            FlexBounds(minimum: 20, preferred: 26, maximum: 36, grow: 0.5, shrink: 1)
         case .gauge:
-            FlexBounds(minimum: 26, preferred: 34, maximum: 46, grow: 1, shrink: 1)
+            FlexBounds(minimum: 28, preferred: 36, maximum: 48, grow: 1, shrink: 1)
         case .sparkline:
-            FlexBounds(minimum: 42, preferred: 58, maximum: 96, grow: 2, shrink: 1)
+            FlexBounds(minimum: 44, preferred: 60, maximum: 98, grow: 2, shrink: 1)
         case .plot:
-            FlexBounds(minimum: 56, preferred: 90, maximum: 180, grow: 3, shrink: 1)
+            FlexBounds(minimum: 70, preferred: 104, maximum: 194, grow: 3, shrink: 1)
         case .table:
-            FlexBounds(minimum: 54, preferred: 100, maximum: 240, grow: 2, shrink: 1)
+            FlexBounds(minimum: 64, preferred: 112, maximum: 250, grow: 2, shrink: 1)
         case .compactStatus:
-            FlexBounds(minimum: 52, preferred: 58, maximum: 64, grow: 0, shrink: 0)
+            FlexBounds(minimum: 54, preferred: 62, maximum: 68, grow: 0, shrink: 0)
         }
     }
 

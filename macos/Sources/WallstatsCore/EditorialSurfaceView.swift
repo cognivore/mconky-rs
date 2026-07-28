@@ -106,8 +106,8 @@ private struct SurfaceSectionChrome: View {
             SurfaceSectionOutline(gapWidth: gapWidth)
                 .stroke(SurfacePalette.outline, lineWidth: 0.75)
             Text(title)
-                .font(.system(size: 8, weight: .medium, design: .monospaced))
-                .tracking(0.6)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .tracking(0.8)
                 .foregroundStyle(SurfacePalette.secondary)
                 .lineLimit(1)
                 .offset(x: 16)
@@ -115,7 +115,7 @@ private struct SurfaceSectionChrome: View {
     }
 
     private var gapWidth: CGFloat {
-        min(max(CGFloat(title.count) * 5.5 + 14, 34), 160)
+        min(max(CGFloat(title.count) * 7 + 16, 40), 220)
     }
 }
 
@@ -179,14 +179,17 @@ private struct SurfaceWidgetLeaf: View {
                 SurfacePlot(series: [series(metric: widget.metric, accent: widget.accent)])
             }
         case .plot:
+            let plotSeries = widget.series.map { series(metric: $0.metric, accent: $0.accent) }
             VStack(alignment: .leading, spacing: 4) {
                 if !widget.label.isEmpty {
                     Text(widget.label)
-                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .tracking(0.35)
                         .foregroundStyle(SurfacePalette.secondary)
                         .lineLimit(1)
                 }
-                SurfacePlot(series: widget.series.map { series(metric: $0.metric, accent: $0.accent) })
+                SurfacePlotLegend(series: plotSeries)
+                SurfacePlot(series: plotSeries)
             }
         case .compactStatus:
             SurfaceCompactStatus(
@@ -205,11 +208,13 @@ private struct SurfaceWidgetLeaf: View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
             Text(widget.label)
                 .foregroundStyle(SurfacePalette.secondary)
+                .tracking(0.35)
+                .layoutPriority(1)
             Spacer(minLength: 3)
             Text(formattedValue)
                 .foregroundStyle(SurfacePalette.primary)
         }
-        .font(.system(size: 10, weight: .medium, design: .monospaced))
+        .font(.system(size: 11, weight: .medium, design: .monospaced))
         .lineLimit(1)
     }
 
@@ -229,9 +234,15 @@ private struct SurfaceWidgetLeaf: View {
 
     private func series(metric: String, accent: String?) -> SurfacePlotSeries {
         guard let state = states[metric], state.error == nil else {
-            return SurfacePlotSeries(samples: [], valueType: .number, color: SurfacePalette.accent(accent))
+            return SurfacePlotSeries(
+                label: SurfaceMetricLabel.compact(metric),
+                samples: [],
+                valueType: .number,
+                color: SurfacePalette.accent(accent)
+            )
         }
         return SurfacePlotSeries(
+            label: SurfaceMetricLabel.compact(metric),
             samples: state.history.isEmpty
                 ? state.value?.numericValue.map { [$0] } ?? []
                 : state.history,
@@ -261,9 +272,47 @@ private struct SurfaceGauge: View {
 }
 
 private struct SurfacePlotSeries {
+    let label: String
     let samples: [Double]
     let valueType: MetricValueType
     let color: Color
+}
+
+private struct SurfacePlotLegend: View {
+    let series: [SurfacePlotSeries]
+
+    var body: some View {
+        if series.count > 1 {
+            HStack(spacing: 8) {
+                ForEach(series.indices, id: \.self) { index in
+                    HStack(spacing: 3) {
+                        Capsule()
+                            .fill(series[index].color)
+                            .frame(width: 7, height: 2)
+                        Text(series[index].label)
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .tracking(0.25)
+            .foregroundStyle(SurfacePalette.primary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+        }
+    }
+}
+
+private enum SurfaceMetricLabel {
+    private static let genericSuffixes = Set(["ratio", "total", "value"])
+
+    static func compact(_ metric: String) -> String {
+        let components = metric.split(separator: ".").map(String.init)
+        let component = components.reversed().first { !genericSuffixes.contains($0.lowercased()) }
+            ?? components.last
+            ?? metric
+        return String(component.prefix(5)).uppercased()
+    }
 }
 
 private struct SurfacePlot: View {
@@ -348,8 +397,10 @@ private struct SurfaceCompactStatus: View {
         VStack(spacing: 5) {
             if !label.isEmpty {
                 Text(label)
-                    .font(.system(size: 8, design: .monospaced))
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .tracking(0.35)
                     .foregroundStyle(SurfacePalette.secondary)
+                    .lineLimit(1)
             }
             HStack(spacing: CGFloat(layout.spacing)) {
                 Text(value?.leading ?? "☁️")
@@ -443,7 +494,8 @@ private struct SurfaceTable: View {
                 }
             }
         }
-        .font(.system(size: 8, design: .monospaced))
+        .font(.system(size: 10, design: .monospaced))
+        .tracking(0.25)
         .foregroundStyle(SurfacePalette.primary)
         .lineLimit(1)
     }
@@ -462,7 +514,7 @@ private struct SurfaceEmptyMark: View {
 
 private enum SurfacePalette {
     static let primary = Color.white.opacity(0.86)
-    static let secondary = Color.white.opacity(0.52)
+    static let secondary = Color.white.opacity(0.68)
     static let outline = Color.white.opacity(0.16)
     static let track = Color.white.opacity(0.07)
     static let grid = Color.white.opacity(0.055)

@@ -51,9 +51,9 @@ widths re-homes those tracks to a source-ordered vertical stack. Runtime metric
 values never affect geometry.
 
 The desktop surface is the Conky-like overlay. Its signed `x`/`y` position is
-measured from the main screen's top-left and its configured `width` drives the
+measured from the main screen's bottom-left and its configured `width` drives the
 width-first solve; the natural AST height determines the panel height. The
-current example uses `.position(270.0, 0.0).width(400.0)`, transparent background,
+current example uses `.position(270.0, 0.0).width(480.0)`, transparent background,
 and click-through input. WidgetKit receives separate large, medium, and small
 roots built from the same node types.
 
@@ -187,7 +187,7 @@ if desktop_enabled {
     surfaces.push(
         Surface::desktop(LayoutNode::stack(10.0, vec![perf.clone()]))
             .position(270.0, 0.0)
-            .width(400.0)
+            .width(480.0)
             .background_opacity(0.0)
             .click_through(true),
     );

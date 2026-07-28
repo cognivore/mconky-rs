@@ -44,7 +44,7 @@ impl Surface {
             root,
             x: Some(0.0),
             y: Some(0.0),
-            width: Some(400.0),
+            width: Some(480.0),
             background_opacity: Some(0.0),
             click_through: Some(true),
         }
@@ -77,7 +77,7 @@ impl Surface {
         }
     }
 
-    /// Sets signed desktop coordinates from the main-screen top-left.
+    /// Sets signed desktop coordinates from the main-screen bottom-left.
     pub fn position(mut self, x: f64, y: f64) -> Self {
         self.x = Some(x);
         self.y = Some(y);

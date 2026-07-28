@@ -140,7 +140,7 @@ fn configure() -> Result<App, Box<dyn Error>> {
                                 LayoutNode::flow(
                                     6.0,
                                     6.0,
-                                    72.0,
+                                    100.0,
                                     vec![
                                         LayoutNode::widget(cpu.clone()),
                                         LayoutNode::widget(gpu.clone()),
@@ -165,7 +165,7 @@ fn configure() -> Result<App, Box<dyn Error>> {
                         LayoutNode::flow(
                             6.0,
                             6.0,
-                            88.0,
+                            104.0,
                             vec![
                                 LayoutNode::widget(ram_used.clone()),
                                 LayoutNode::widget(ram_total.clone()),
@@ -182,7 +182,7 @@ fn configure() -> Result<App, Box<dyn Error>> {
                         LayoutNode::flow(
                             6.0,
                             6.0,
-                            82.0,
+                            100.0,
                             vec![
                                 LayoutNode::widget(disk_free.clone()),
                                 LayoutNode::widget(disk_used.clone()),
@@ -198,7 +198,7 @@ fn configure() -> Result<App, Box<dyn Error>> {
                         LayoutNode::flow(
                             6.0,
                             6.0,
-                            120.0,
+                            160.0,
                             vec![
                                 LayoutNode::widget(network_down.clone()),
                                 LayoutNode::widget(network_up.clone()),
@@ -213,7 +213,7 @@ fn configure() -> Result<App, Box<dyn Error>> {
                 ],
             ))
             .position(270.0, 0.0)
-            .width(400.0)
+            .width(480.0)
             .background_opacity(0.0)
             .click_through(true),
         );
@@ -231,7 +231,7 @@ fn configure() -> Result<App, Box<dyn Error>> {
                             LayoutNode::flow(
                                 5.0,
                                 5.0,
-                                78.0,
+                                100.0,
                                 vec![
                                     LayoutNode::widget(cpu.clone()),
                                     LayoutNode::widget(gpu.clone()),
@@ -252,7 +252,7 @@ fn configure() -> Result<App, Box<dyn Error>> {
                     LayoutNode::flow(
                         5.0,
                         5.0,
-                        86.0,
+                        108.0,
                         vec![
                             LayoutNode::widget(disk_free.clone()),
                             LayoutNode::widget(disk_used.clone()),
@@ -277,7 +277,7 @@ fn configure() -> Result<App, Box<dyn Error>> {
                     LayoutNode::flow(
                         5.0,
                         5.0,
-                        70.0,
+                        86.0,
                         vec![
                             LayoutNode::widget(cpu.clone()),
                             LayoutNode::widget(gpu.clone()),
@@ -291,7 +291,7 @@ fn configure() -> Result<App, Box<dyn Error>> {
                     LayoutNode::flow(
                         5.0,
                         5.0,
-                        80.0,
+                        96.0,
                         vec![
                             LayoutNode::widget(disk_free.clone()),
                             LayoutNode::widget(network_down.clone()),
@@ -306,7 +306,7 @@ fn configure() -> Result<App, Box<dyn Error>> {
         surfaces.push(Surface::widget_small(LayoutNode::flow(
             4.0,
             4.0,
-            62.0,
+            76.0,
             vec![
                 LayoutNode::widget(cpu),
                 LayoutNode::widget(gpu),
