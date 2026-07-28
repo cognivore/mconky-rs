@@ -1,14 +1,23 @@
 use crate::app::Schedule;
 use crate::collector::{CollectError, CollectedMetric, Source};
-use crate::command::run_bounded;
 use crate::{Bytes, ConfigError, Metric, MetricId, Number, Ratio, WireType};
 use serde_json::Value;
+use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::process::{Child, ChildStdout, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
-const MAX_COMMAND_BYTES: usize = 256 * 1024;
+const MAX_LINE_BYTES: usize = 256 * 1024;
+const WORKER_INTERVAL: Duration = Duration::from_millis(1);
+const INITIAL_RESTART_BACKOFF: Duration = Duration::from_secs(1);
+const MAX_RESTART_BACKOFF: Duration = Duration::from_secs(30);
 
-/// Settings for one-shot `macmon pipe` collection.
+/// Settings for long-lived `macmon pipe` collection.
+///
+/// The child is killed and waited in `Drop` during graceful configuration
+/// reload. The native host should still terminate the entire configuration
+/// process group because forced termination can bypass Rust destructors.
 #[derive(Clone, Debug)]
 pub struct MacmonCollector {
     executable: PathBuf,
@@ -176,23 +185,23 @@ impl MacmonMetricIds {
 pub(crate) struct MacmonSource {
     ids: MacmonMetricIds,
     settings: MacmonCollector,
+    process: Option<MacmonProcess>,
+    backoff: RestartBackoff,
 }
 
 impl MacmonSource {
     pub(crate) fn new(ids: MacmonMetricIds, settings: MacmonCollector) -> Self {
-        Self { ids, settings }
+        Self {
+            ids,
+            settings,
+            process: None,
+            backoff: RestartBackoff::default(),
+        }
     }
 
-    fn collect_json(&self, bytes: &[u8]) -> Vec<CollectedMetric> {
-        let root: Value = match serde_json::from_slice(bytes) {
-            Ok(root) => root,
-            Err(error) => {
-                return all_errors(
-                    &self.ids,
-                    CollectError::new(format!("cannot parse macmon JSON: {error}")),
-                );
-            }
-        };
+    fn parse_json(&self, bytes: &[u8]) -> Result<ParsedMacmonSample, CollectError> {
+        let root: Value = serde_json::from_slice(bytes)
+            .map_err(|error| CollectError::new(format!("cannot parse macmon JSON: {error}")))?;
 
         let cpu_total = ratio_field(number(&root, &["cpu_usage_pct"]), "cpu_usage_pct");
         let p_frequency = bounded_number(
@@ -246,26 +255,62 @@ impl MacmonSource {
         let swap_used = unsigned(&root, &["memory", "swap_usage"]);
         let swap_total = unsigned(&root, &["memory", "swap_total"]);
         let swap_ratio = memory_ratio(swap_used.clone(), swap_total.clone(), "swap");
+        let should_restart = cpu_total.is_err()
+            || p_ratio.is_err()
+            || p_frequency.is_err()
+            || e_ratio.is_err()
+            || e_frequency.is_err()
+            || gpu_ratio.is_err()
+            || gpu_frequency.is_err()
+            || cpu_temperature.is_err()
+            || gpu_temperature.is_err()
+            || cpu_power.is_err()
+            || gpu_power.is_err()
+            || ram_used.is_err()
+            || ram_total.is_err()
+            || ram_ratio.is_err()
+            || swap_used.is_err()
+            || swap_total.is_err()
+            || swap_ratio.is_err();
 
-        vec![
-            encoded::<Ratio>(self.ids.ids[0].clone(), cpu_total),
-            encoded::<Ratio>(self.ids.ids[1].clone(), p_ratio),
-            encoded::<Number>(self.ids.ids[2].clone(), p_frequency),
-            encoded::<Ratio>(self.ids.ids[3].clone(), e_ratio),
-            encoded::<Number>(self.ids.ids[4].clone(), e_frequency),
-            encoded::<Ratio>(self.ids.ids[5].clone(), gpu_ratio),
-            encoded::<Number>(self.ids.ids[6].clone(), gpu_frequency),
-            encoded::<Number>(self.ids.ids[7].clone(), cpu_temperature),
-            encoded::<Number>(self.ids.ids[8].clone(), gpu_temperature),
-            encoded::<Number>(self.ids.ids[9].clone(), cpu_power),
-            encoded::<Number>(self.ids.ids[10].clone(), gpu_power),
-            encoded::<Bytes>(self.ids.ids[11].clone(), ram_used),
-            encoded::<Bytes>(self.ids.ids[12].clone(), ram_total),
-            encoded::<Ratio>(self.ids.ids[13].clone(), ram_ratio),
-            encoded::<Bytes>(self.ids.ids[14].clone(), swap_used),
-            encoded::<Bytes>(self.ids.ids[15].clone(), swap_total),
-            encoded::<Ratio>(self.ids.ids[16].clone(), swap_ratio),
-        ]
+        Ok(ParsedMacmonSample {
+            values: vec![
+                encoded::<Ratio>(self.ids.ids[0].clone(), cpu_total),
+                encoded::<Ratio>(self.ids.ids[1].clone(), p_ratio),
+                encoded::<Number>(self.ids.ids[2].clone(), p_frequency),
+                encoded::<Ratio>(self.ids.ids[3].clone(), e_ratio),
+                encoded::<Number>(self.ids.ids[4].clone(), e_frequency),
+                encoded::<Ratio>(self.ids.ids[5].clone(), gpu_ratio),
+                encoded::<Number>(self.ids.ids[6].clone(), gpu_frequency),
+                encoded::<Number>(self.ids.ids[7].clone(), cpu_temperature),
+                encoded::<Number>(self.ids.ids[8].clone(), gpu_temperature),
+                encoded::<Number>(self.ids.ids[9].clone(), cpu_power),
+                encoded::<Number>(self.ids.ids[10].clone(), gpu_power),
+                encoded::<Bytes>(self.ids.ids[11].clone(), ram_used),
+                encoded::<Bytes>(self.ids.ids[12].clone(), ram_total),
+                encoded::<Ratio>(self.ids.ids[13].clone(), ram_ratio),
+                encoded::<Bytes>(self.ids.ids[14].clone(), swap_used),
+                encoded::<Bytes>(self.ids.ids[15].clone(), swap_total),
+                encoded::<Ratio>(self.ids.ids[16].clone(), swap_ratio),
+            ],
+            should_restart,
+        })
+    }
+
+    #[cfg(test)]
+    fn collect_json(&self, bytes: &[u8]) -> Vec<CollectedMetric> {
+        self.parse_json(bytes)
+            .map(|sample| sample.values)
+            .unwrap_or_else(|error| all_errors(&self.ids, error))
+    }
+
+    fn restart_with_error(&mut self, error: CollectError) -> Vec<CollectedMetric> {
+        self.process.take();
+        let delay = self.backoff.record_failure(Instant::now());
+        all_errors(
+            &self.ids,
+            CollectError::new(format!("{error}; macmon restart in {} ms", delay.as_millis())),
+        )
     }
 }
 
@@ -275,18 +320,197 @@ impl Source for MacmonSource {
     }
 
     fn interval(&self) -> Duration {
-        self.settings.schedule.interval()
+        // read_line blocks for the macmon cadence; avoid sleeping that cadence again.
+        WORKER_INTERVAL
     }
 
     fn collect(&mut self) -> Vec<CollectedMetric> {
-        match run_bounded(
-            &self.settings.executable,
-            &["pipe", "-s", "1", "--soc-info"],
-            MAX_COMMAND_BYTES,
-        ) {
-            Ok(output) => self.collect_json(&output),
-            Err(error) => all_errors(&self.ids, error),
+        self.backoff.wait_until_ready();
+        if self.process.is_none() {
+            match MacmonProcess::spawn(&self.settings) {
+                Ok(process) => self.process = Some(process),
+                Err(error) => return self.restart_with_error(error),
+            }
         }
+
+        let read_result = match self.process.as_mut() {
+            Some(process) => process.read_line(),
+            None => {
+                return self.restart_with_error(CollectError::new(
+                    "macmon process was not initialized",
+                ));
+            }
+        };
+        let line = match read_result {
+            Ok(LineRead::Line(line)) => line,
+            Ok(LineRead::Eof) => {
+                let error = self
+                    .process
+                    .as_mut()
+                    .map_or_else(|| CollectError::new("macmon process disappeared"), MacmonProcess::eof_error);
+                return self.restart_with_error(error);
+            }
+            Ok(LineRead::TooLong) => {
+                return self.restart_with_error(CollectError::new(format!(
+                    "macmon JSON line exceeds {MAX_LINE_BYTES} bytes"
+                )));
+            }
+            Err(error) => {
+                return self.restart_with_error(CollectError::new(format!(
+                    "cannot read macmon output: {error}"
+                )));
+            }
+        };
+        match self.parse_json(&line) {
+            Ok(sample) => {
+                if sample.should_restart {
+                    self.process.take();
+                    self.backoff.record_failure(Instant::now());
+                } else {
+                    self.backoff.reset();
+                }
+                sample.values
+            }
+            Err(error) => self.restart_with_error(error),
+        }
+    }
+}
+
+struct ParsedMacmonSample {
+    values: Vec<CollectedMetric>,
+    should_restart: bool,
+}
+
+struct MacmonProcess {
+    child: Child,
+    stdout: BufReader<ChildStdout>,
+}
+
+impl MacmonProcess {
+    fn spawn(settings: &MacmonCollector) -> Result<Self, CollectError> {
+        let interval_ms = settings.schedule.interval().as_millis().to_string();
+        let mut child = Command::new(&settings.executable)
+            .args([
+                "pipe",
+                "-s",
+                "0",
+                "--soc-info",
+                "-i",
+                interval_ms.as_str(),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| {
+                CollectError::new(format!(
+                    "cannot start macmon {}: {error}",
+                    settings.executable.display()
+                ))
+            })?;
+        let stdout = match child.stdout.take() {
+            Some(stdout) => stdout,
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(CollectError::new("macmon stdout pipe is unavailable"));
+            }
+        };
+        Ok(Self {
+            child,
+            stdout: BufReader::new(stdout),
+        })
+    }
+
+    fn read_line(&mut self) -> io::Result<LineRead> {
+        read_bounded_line(&mut self.stdout, MAX_LINE_BYTES)
+    }
+
+    fn eof_error(&mut self) -> CollectError {
+        match self.child.try_wait() {
+            Ok(Some(status)) if status.success() => {
+                CollectError::new("macmon exited and closed stdout")
+            }
+            Ok(Some(status)) => CollectError::new(format!("macmon exited with {status}")),
+            Ok(None) => CollectError::new("macmon closed stdout while still running"),
+            Err(error) => CollectError::new(format!("cannot inspect macmon exit status: {error}")),
+        }
+    }
+}
+
+impl Drop for MacmonProcess {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum LineRead {
+    Line(Vec<u8>),
+    Eof,
+    TooLong,
+}
+
+fn read_bounded_line(reader: &mut impl BufRead, limit: usize) -> io::Result<LineRead> {
+    let mut line = Vec::new();
+    let mut exceeded = false;
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Ok(if exceeded {
+                LineRead::TooLong
+            } else if line.is_empty() {
+                LineRead::Eof
+            } else {
+                LineRead::Line(line)
+            });
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(available.len(), |index| index + 1);
+        let content = newline.map_or(available, |index| &available[..index]);
+        let remaining = limit.saturating_sub(line.len());
+        let retained = remaining.min(content.len());
+        line.extend_from_slice(&content[..retained]);
+        exceeded |= retained < content.len();
+        reader.consume(consumed);
+        if newline.is_some() {
+            return Ok(if exceeded {
+                LineRead::TooLong
+            } else {
+                LineRead::Line(line)
+            });
+        }
+    }
+}
+
+#[derive(Default)]
+struct RestartBackoff {
+    failures: u32,
+    retry_at: Option<Instant>,
+}
+
+impl RestartBackoff {
+    fn record_failure(&mut self, now: Instant) -> Duration {
+        let multiplier = 1_u32 << self.failures.min(5);
+        let delay = INITIAL_RESTART_BACKOFF
+            .checked_mul(multiplier)
+            .unwrap_or(MAX_RESTART_BACKOFF)
+            .min(MAX_RESTART_BACKOFF);
+        self.failures = self.failures.saturating_add(1);
+        self.retry_at = Some(now + delay);
+        delay
+    }
+
+    fn wait_until_ready(&self) {
+        if let Some(retry_at) = self.retry_at {
+            thread::sleep(retry_at.saturating_duration_since(Instant::now()));
+        }
+    }
+
+    fn reset(&mut self) {
+        self.failures = 0;
+        self.retry_at = None;
     }
 }
 
@@ -381,10 +605,15 @@ fn all_errors(ids: &MacmonMetricIds, error: CollectError) -> Vec<CollectedMetric
 
 #[cfg(test)]
 mod tests {
-    use super::{MacmonCollector, MacmonMetricIds, MacmonSource, bounded_number};
+    use super::{
+        INITIAL_RESTART_BACKOFF, LineRead, MacmonCollector, MacmonMetricIds, MacmonSource,
+        RestartBackoff, bounded_number, read_bounded_line,
+    };
     use crate::ConfigError;
     use serde_json::{Value, json};
+    use std::io::Cursor;
     use std::path::PathBuf;
+    use std::time::Instant;
 
     const FIXTURE: &str = r#"{
         "cpu_power":2.1,"cpu_usage_pct":0.25,"ecpu_usage":[1686,0.2],
@@ -439,6 +668,20 @@ mod tests {
     }
 
     #[test]
+    fn field_validation_errors_request_a_lazy_restart() {
+        let mut fixture: Value = serde_json::from_str(FIXTURE).unwrap();
+        fixture.as_object_mut().unwrap().remove("gpu_power");
+        let source = MacmonSource::new(
+            MacmonMetricIds::parse().unwrap(),
+            MacmonCollector::new(),
+        );
+        let sample = source
+            .parse_json(&serde_json::to_vec(&fixture).unwrap())
+            .unwrap();
+        assert!(sample.should_restart);
+    }
+
+    #[test]
     fn rejects_nonfinite_and_invalid_executable_settings() {
         assert!(bounded_number(Ok(f64::NAN), "test", 0.0, 1.0).is_err());
         assert!(matches!(
@@ -458,5 +701,42 @@ mod tests {
             "macmon.cpu.p.frequency"
         );
         assert_eq!(handles.swap_ratio.id().as_str(), "macmon.swap.ratio");
+    }
+
+    #[test]
+    fn long_lived_reader_returns_successive_bounded_lines() {
+        let mut input = Cursor::new(b"{\"one\":1}\n{\"two\":2}\n".to_vec());
+        assert_eq!(
+            read_bounded_line(&mut input, 256).unwrap(),
+            LineRead::Line(b"{\"one\":1}".to_vec())
+        );
+        assert_eq!(
+            read_bounded_line(&mut input, 256).unwrap(),
+            LineRead::Line(b"{\"two\":2}".to_vec())
+        );
+        assert_eq!(read_bounded_line(&mut input, 256).unwrap(), LineRead::Eof);
+    }
+
+    #[test]
+    fn oversized_line_is_drained_before_the_next_line() {
+        let mut input = Cursor::new(b"123456789\nok\n".to_vec());
+        assert_eq!(read_bounded_line(&mut input, 4).unwrap(), LineRead::TooLong);
+        assert_eq!(
+            read_bounded_line(&mut input, 4).unwrap(),
+            LineRead::Line(b"ok".to_vec())
+        );
+    }
+
+    #[test]
+    fn restart_backoff_grows_and_resets_deterministically() {
+        let start = Instant::now();
+        let mut backoff = RestartBackoff::default();
+        assert_eq!(backoff.record_failure(start), INITIAL_RESTART_BACKOFF);
+        assert_eq!(
+            backoff.record_failure(start + INITIAL_RESTART_BACKOFF),
+            INITIAL_RESTART_BACKOFF * 2
+        );
+        backoff.reset();
+        assert_eq!(backoff.record_failure(start), INITIAL_RESTART_BACKOFF);
     }
 }

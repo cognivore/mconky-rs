@@ -4,6 +4,23 @@ import Testing
 
 @Suite("Launch resolution")
 struct LaunchResolverTests {
+    @Test("Only the bundled helper opts into process-group termination")
+    func bundledHelperProcessGroupDetection() {
+        let bundled = URL(fileURLWithPath: "/Applications/Wallstats.app/Contents/Helpers/wallstats-rust-script")
+        #expect(CollectorSupervisor.shouldTerminateProcessGroup(
+            executableURL: bundled,
+            bundledRustScriptURL: bundled
+        ))
+        #expect(!CollectorSupervisor.shouldTerminateProcessGroup(
+            executableURL: URL(fileURLWithPath: "/usr/local/bin/rust-script"),
+            bundledRustScriptURL: bundled
+        ))
+        #expect(!CollectorSupervisor.shouldTerminateProcessGroup(
+            executableURL: bundled,
+            bundledRustScriptURL: nil
+        ))
+    }
+
     @Test("An explicit environment override wins over the bundled helper")
     func overrideWins() throws {
         let fixture = try ResolverFixture()

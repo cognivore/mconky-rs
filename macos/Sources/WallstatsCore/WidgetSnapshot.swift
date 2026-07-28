@@ -170,64 +170,60 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
 
     public let schemaVersion: Int
     public let sampledAt: Date
+    public let widgetSurfaces: [SurfacePlan]
     public let renderPlan: WidgetRenderPlan
     public let metrics: [WidgetRenderMetric]
 
     public init(
         sampledAt: Date,
         renderPlan: WidgetRenderPlan,
-        metrics: [WidgetRenderMetric]
+        metrics: [WidgetRenderMetric],
+        widgetSurfaces: [SurfacePlan] = []
     ) throws {
         try self.init(
             schemaVersion: Self.currentSchemaVersion,
             sampledAt: sampledAt,
+            widgetSurfaces: widgetSurfaces,
             renderPlan: renderPlan,
             metrics: metrics
         )
     }
 
     public init(dashboard: DashboardState, sampledAt: Date) throws {
-        let renderPlan = WidgetRenderPlan(dashboard.plan)
-        let references = Self.references(in: dashboard.plan)
-        let definitions = Dictionary(uniqueKeysWithValues: dashboard.plan.metrics.map { ($0.id, $0) })
-        let metrics = references.order.compactMap { metricID -> WidgetRenderMetric? in
-            guard let definition = definitions[metricID],
-                  let snapshot = dashboard.metrics[metricID]
-            else {
-                return nil
-            }
-            let historyLimit = min(references.historyLimits[metricID] ?? 0, Self.maximumHistoryCount)
-            return WidgetRenderMetric(
-                metricID: metricID,
-                valueType: definition.valueType,
-                value: Self.boundedValue(snapshot.value),
-                error: snapshot.error.map { String($0.prefix(256)) },
-                timestampMS: snapshot.timestampMS,
-                history: dashboard.history(for: metricID, limit: historyLimit).map(\.value)
-            )
-        }
+        let widgetSurfaces = dashboard.plan.surfaces.filter { $0.kind != .desktop }
+        let renderPlan = widgetSurfaces.isEmpty
+            ? WidgetRenderPlan(dashboard.plan)
+            : WidgetRenderPlan(sections: [])
+        let references = widgetSurfaces.isEmpty
+            ? Self.references(in: dashboard.plan)
+            : Self.references(in: widgetSurfaces)
+        let metrics = Self.makeMetrics(dashboard: dashboard, references: references)
 
         try self.init(
             sampledAt: sampledAt,
             renderPlan: renderPlan,
-            metrics: metrics
+            metrics: metrics,
+            widgetSurfaces: widgetSurfaces
         )
     }
 
     private init(
         schemaVersion: Int,
         sampledAt: Date,
+        widgetSurfaces: [SurfacePlan],
         renderPlan: WidgetRenderPlan,
         metrics: [WidgetRenderMetric]
     ) throws {
         try Self.validate(
             schemaVersion: schemaVersion,
             sampledAt: sampledAt,
+            widgetSurfaces: widgetSurfaces,
             renderPlan: renderPlan,
             metrics: metrics
         )
         self.schemaVersion = schemaVersion
         self.sampledAt = sampledAt
+        self.widgetSurfaces = widgetSurfaces
         self.renderPlan = renderPlan
         self.metrics = metrics
     }
@@ -235,6 +231,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion = "v"
         case sampledAt = "t"
+        case widgetSurfaces = "u"
         case renderPlan = "p"
         case metrics = "m"
     }
@@ -245,6 +242,10 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         try self.init(
             schemaVersion: try container.decode(Int.self, forKey: .schemaVersion),
             sampledAt: try container.decode(Date.self, forKey: .sampledAt),
+            widgetSurfaces: try container.decodeIfPresent(
+                [SurfacePlan].self,
+                forKey: .widgetSurfaces
+            ) ?? [],
             renderPlan: try (hasGenericPlan
                 ? container.decodeIfPresent(WidgetRenderPlan.self, forKey: .renderPlan)
                 : nil)
@@ -259,12 +260,16 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         try Self.validate(
             schemaVersion: schemaVersion,
             sampledAt: sampledAt,
+            widgetSurfaces: widgetSurfaces,
             renderPlan: renderPlan,
             metrics: metrics
         )
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(schemaVersion, forKey: .schemaVersion)
         try container.encode(sampledAt, forKey: .sampledAt)
+        if !widgetSurfaces.isEmpty {
+            try container.encode(widgetSurfaces, forKey: .widgetSurfaces)
+        }
         try container.encode(renderPlan, forKey: .renderPlan)
         try container.encode(metrics, forKey: .metrics)
     }
@@ -272,6 +277,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     private static func validate(
         schemaVersion: Int,
         sampledAt: Date,
+        widgetSurfaces: [SurfacePlan],
         renderPlan: WidgetRenderPlan,
         metrics: [WidgetRenderMetric]
     ) throws {
@@ -284,6 +290,9 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         }
         guard renderPlan.sections.allSatisfy({ (1 ... 16).contains($0.weight) }) else {
             throw WidgetSnapshotValidationError.invalidValue("section weight")
+        }
+        guard widgetSurfaces.allSatisfy({ $0.kind != .desktop }) else {
+            throw WidgetSnapshotValidationError.invalidValue("widget surface kind")
         }
 
         var seen: Set<String> = []
@@ -361,6 +370,85 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             }
         }
         return (order, historyLimits)
+    }
+
+    public static func renderMetrics(
+        dashboard: DashboardState,
+        root: LayoutNode
+    ) -> [WidgetRenderMetric] {
+        makeMetrics(dashboard: dashboard, references: references(in: [
+            SurfacePlan(kind: .widgetLarge, root: root),
+        ]))
+    }
+
+    private static func references(
+        in surfaces: [SurfacePlan]
+    ) -> (order: [String], historyLimits: [String: Int]) {
+        var order: [String] = []
+        var seen: Set<String> = []
+        var historyLimits: [String: Int] = [:]
+        for surface in surfaces {
+            for widget in widgets(in: surface.root) {
+                if widget.kind == .plot {
+                    for series in widget.series {
+                        if seen.insert(series.metric).inserted {
+                            order.append(series.metric)
+                        }
+                        historyLimits[series.metric] = max(
+                            historyLimits[series.metric, default: 0],
+                            widget.history ?? 0
+                        )
+                    }
+                } else if !widget.metric.isEmpty {
+                    if seen.insert(widget.metric).inserted {
+                        order.append(widget.metric)
+                    }
+                    if widget.kind == .sparkline {
+                        historyLimits[widget.metric] = max(
+                            historyLimits[widget.metric, default: 0],
+                            widget.history ?? 0
+                        )
+                    }
+                }
+            }
+        }
+        return (order, historyLimits)
+    }
+
+    private static func widgets(in node: LayoutNode) -> [WidgetPlan] {
+        switch node {
+        case let .widget(widget):
+            [widget]
+        case let .section(_, _, child):
+            widgets(in: child)
+        case let .stack(_, children), let .flow(_, _, _, children):
+            children.flatMap(widgets)
+        case let .split(_, _, tracks):
+            tracks.flatMap { widgets(in: $0.child) }
+        }
+    }
+
+    private static func makeMetrics(
+        dashboard: DashboardState,
+        references: (order: [String], historyLimits: [String: Int])
+    ) -> [WidgetRenderMetric] {
+        let definitions = Dictionary(uniqueKeysWithValues: dashboard.plan.metrics.map { ($0.id, $0) })
+        return references.order.compactMap { metricID -> WidgetRenderMetric? in
+            guard let definition = definitions[metricID],
+                  let snapshot = dashboard.metrics[metricID]
+            else {
+                return nil
+            }
+            let historyLimit = min(references.historyLimits[metricID] ?? 0, maximumHistoryCount)
+            return WidgetRenderMetric(
+                metricID: metricID,
+                valueType: definition.valueType,
+                value: boundedValue(snapshot.value),
+                error: snapshot.error.map { String($0.prefix(256)) },
+                timestampMS: snapshot.timestampMS,
+                history: dashboard.history(for: metricID, limit: historyLimit).map(\.value)
+            )
+        }
     }
 
     private static func boundedValue(_ value: TypedMetricValue?) -> TypedMetricValue? {

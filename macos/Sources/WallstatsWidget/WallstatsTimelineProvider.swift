@@ -15,6 +15,46 @@ struct WallstatsEntry: TimelineEntry {
 struct WallstatsTimelineProvider: TimelineProvider {
     private static let graphicalSample: WidgetSnapshot = {
         do {
+            let root = LayoutNode.stack(gap: 8, children: [
+                .section(
+                    title: "performance",
+                    insets: LayoutInsets(top: 6, right: 8, bottom: 6, left: 8),
+                    child: .flow(
+                        horizontalGap: 6,
+                        verticalGap: 6,
+                        minimumItemWidth: 72,
+                        children: [
+                            .widget(WidgetPlan(
+                                kind: .gauge,
+                                label: "cpu",
+                                metric: "sample.ratio",
+                                format: .percent,
+                                accent: "cyan"
+                            )),
+                            .widget(WidgetPlan(
+                                kind: .gauge,
+                                label: "memory",
+                                metric: "sample.memory",
+                                format: .percent,
+                                accent: "violet"
+                            )),
+                        ]
+                    )
+                ),
+                .section(
+                    title: "signals",
+                    insets: LayoutInsets(top: 6, right: 8, bottom: 6, left: 8),
+                    child: .widget(WidgetPlan(
+                        kind: .plot,
+                        label: "activity",
+                        history: 20,
+                        series: [
+                            PlotSeries(metric: "sample.ratio", format: .percent, accent: "cyan"),
+                            PlotSeries(metric: "sample.rate", format: .bytesPerSecond, accent: "blue"),
+                        ]
+                    ))
+                ),
+            ])
             return try WidgetSnapshot(
                 sampledAt: Date(timeIntervalSince1970: 1_700_000_000),
                 renderPlan: WidgetRenderPlan(sections: [
@@ -106,6 +146,11 @@ struct WallstatsTimelineProvider: TimelineProvider {
                         timestampMS: 1_700_000_000_000,
                         history: []
                     ),
+                ],
+                widgetSurfaces: [
+                    SurfacePlan(kind: .widgetLarge, root: root),
+                    SurfacePlan(kind: .widgetMedium, root: root),
+                    SurfacePlan(kind: .widgetSmall, root: root),
                 ]
             )
         } catch {

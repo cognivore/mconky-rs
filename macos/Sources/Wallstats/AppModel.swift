@@ -197,11 +197,12 @@ final class AppModel: ObservableObject {
     }
 
     private func isReadyForInitialWidgetSnapshot(_ dashboard: DashboardState) -> Bool {
-        let references = Set(dashboard.plan.sections.flatMap { section in
-            section.widgets.flatMap { widget in
-                widget.kind == .plot ? widget.series.map(\.metric) : [widget.metric]
-            }.filter { !$0.isEmpty }
-        })
+        let references = Set(
+            dashboard.plan.surfaces
+                .filter { $0.kind != .desktop }
+                .flatMap { $0.root.referencedMetrics }
+                .filter { !$0.isEmpty }
+        )
         guard !references.isEmpty else { return false }
         return references.allSatisfy { hasReported($0, in: dashboard) }
     }

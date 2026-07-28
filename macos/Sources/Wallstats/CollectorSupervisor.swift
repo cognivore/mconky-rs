@@ -29,6 +29,7 @@ final class CollectorSupervisor {
     private var activeRunID: UInt64 = 0
     private var restartAfterTermination = false
     private var reloadAfterCollectorReady = false
+    private var processUsesGroupTermination = false
     private var acceptingOutput = false
     private var readerShutdownForced = false
     private var shuttingDown = false
@@ -104,7 +105,7 @@ final class CollectorSupervisor {
         acceptingOutput = false
         model.beginReload()
         if process.isRunning {
-            process.terminate()
+            sendSignal(SIGTERM, to: process)
             scheduleForcedTermination(for: process, runID: activeRunID)
         }
     }
@@ -117,7 +118,7 @@ final class CollectorSupervisor {
         acceptingOutput = false
         shutdownCompletion = completion
         if process.isRunning {
-            process.terminate()
+            sendSignal(SIGTERM, to: process)
             scheduleForcedTermination(for: process, runID: activeRunID)
         }
         return true
@@ -130,7 +131,7 @@ final class CollectorSupervisor {
         stdoutReader?.cancel()
         stderrReader?.cancel()
         guard let process, process.isRunning else { return }
-        process.terminate()
+        sendSignal(SIGTERM, to: process)
     }
 
     private func launch(executableURL: URL, configURL: URL) {
@@ -141,6 +142,10 @@ final class CollectorSupervisor {
         readerShutdownForced = false
         restartAfterTermination = false
         reloadAfterCollectorReady = false
+        processUsesGroupTermination = Self.shouldTerminateProcessGroup(
+            executableURL: executableURL,
+            bundledRustScriptURL: resolver.bundledRustScriptURL
+        )
         drainDeadlineTask?.cancel()
         forceKillTask?.cancel()
 
@@ -312,13 +317,15 @@ final class CollectorSupervisor {
 
     private func terminateCurrentProcess() {
         guard let process, process.isRunning else { return }
-        process.terminate()
+        sendSignal(SIGTERM, to: process)
         scheduleForcedTermination(for: process, runID: activeRunID)
     }
 
     private func processDidTerminate(status: Int32, signaled: Bool, runID: UInt64) {
         guard runID == activeRunID, terminationWaitTask == nil else { return }
-        forceKillTask?.cancel()
+        if !processUsesGroupTermination {
+            forceKillTask?.cancel()
+        }
 
         let stdoutReader = stdoutReader
         let stderrReader = stderrReader
@@ -339,6 +346,7 @@ final class CollectorSupervisor {
     private func completeTermination(status: Int32, signaled: Bool, runID: UInt64) {
         guard runID == activeRunID, process != nil else { return }
         drainDeadlineTask?.cancel()
+        forceKillTask?.cancel()
         acceptingOutput = false
         stdoutReader = nil
         stderrReader = nil
@@ -391,6 +399,7 @@ final class CollectorSupervisor {
     private func scheduleForcedTermination(for process: Process, runID: UInt64) {
         forceKillTask?.cancel()
         let processIdentifier = process.processIdentifier
+        let processUsesGroupTermination = processUsesGroupTermination
         forceKillTask = Task { @MainActor [weak self] in
             do {
                 try await Task.sleep(for: .seconds(2))
@@ -402,14 +411,39 @@ final class CollectorSupervisor {
 
             guard let self, runID == activeRunID,
                   let process = self.process,
-                  process.processIdentifier == processIdentifier,
-                  process.isRunning
+                  process.processIdentifier == processIdentifier
             else {
                 return
             }
-            Darwin.kill(processIdentifier, SIGKILL)
+            if processUsesGroupTermination {
+                if Darwin.killpg(processIdentifier, SIGKILL) != 0 {
+                    if process.isRunning {
+                        Darwin.kill(processIdentifier, SIGKILL)
+                    }
+                }
+            } else if process.isRunning {
+                Darwin.kill(processIdentifier, SIGKILL)
+            }
             // Process invokes its termination handler only after waitpid has reaped the child.
         }
+    }
+
+    private func sendSignal(_ signal: Int32, to process: Process) {
+        let processIdentifier = process.processIdentifier
+        if processUsesGroupTermination {
+            if Darwin.killpg(processIdentifier, signal) != 0 {
+                Darwin.kill(processIdentifier, signal)
+            }
+        } else {
+            Darwin.kill(processIdentifier, signal)
+        }
+    }
+
+    nonisolated static func shouldTerminateProcessGroup(
+        executableURL: URL,
+        bundledRustScriptURL: URL?
+    ) -> Bool {
+        bundledRustScriptURL?.standardizedFileURL == executableURL.standardizedFileURL
     }
 
     private func closeUnlaunchedPipes(stdoutPipe: Pipe, stderrPipe: Pipe) {

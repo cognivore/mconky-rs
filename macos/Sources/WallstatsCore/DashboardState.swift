@@ -39,7 +39,8 @@ public struct DashboardState: Equatable, Sendable {
         metrics = Dictionary(uniqueKeysWithValues: plan.metrics.map { ($0.id, MetricSnapshot()) })
 
         var limits: [String: Int] = [:]
-        for widget in plan.sections.flatMap(\.widgets) {
+        let surfaceWidgets = plan.surfaces.flatMap { Self.widgets(in: $0.root) }
+        for widget in plan.sections.flatMap(\.widgets) + surfaceWidgets {
             if widget.kind == .sparkline, let history = widget.history {
                 limits[widget.metric] = max(limits[widget.metric, default: 0], history)
             }
@@ -98,5 +99,18 @@ public struct DashboardState: Equatable, Sendable {
         let samples = histories[metric] ?? []
         guard let limit, limit >= 0, samples.count > limit else { return samples }
         return Array(samples.suffix(limit))
+    }
+
+    private static func widgets(in node: LayoutNode) -> [WidgetPlan] {
+        switch node {
+        case let .widget(widget):
+            [widget]
+        case let .section(_, _, child):
+            widgets(in: child)
+        case let .stack(_, children), let .flow(_, _, _, children):
+            children.flatMap(widgets)
+        case let .split(_, _, tracks):
+            tracks.flatMap { widgets(in: $0.child) }
+        }
     }
 }

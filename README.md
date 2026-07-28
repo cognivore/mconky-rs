@@ -1,9 +1,10 @@
 # Wallstats
 
-Wallstats is a native macOS WidgetKit system monitor configured as typechecked
-Rust. An invisible LaunchAgent runs the `rust-script` process that owns
-collection, scheduling, layout, and user plugins. It publishes compact snapshots
-to the desktop widget through a signed App Group.
+Wallstats is a native macOS desktop and WidgetKit system monitor configured as
+typechecked Rust. An invisible LaunchAgent runs the `rust-script` process that
+owns collection, scheduling, layout, and user plugins. The same native editorial
+renderer presents an optional desktop overlay and signed App Group snapshots for
+the widget families.
 
 The current Conky-like example shows:
 
@@ -25,25 +26,41 @@ gauge fail at compile time.
         |
         | rust-script compiles and runs trusted Rust
         v
-typed collectors and layout (engine/) -- JSON Lines --> background companion
-                                                             |
-                                                   signed App Group snapshot
-                                                             |
-                                                             v
-                                                  WidgetKit desktop widget
+typed collectors + four surface roots -- JSON Lines --> background companion
+                                                    |                 |
+                                           desktop overlay    signed App Group
+                                                                      |
+                                                                      v
+                                                           WidgetKit families
 ```
 
 The collector remains out of process. A bad plugin can fail collection without
 corrupting the native renderer, and configuration reload replaces the process.
 The wire contract is documented in [PROTOCOL.md](PROTOCOL.md).
 
-The rendered widget consumes the section and widget plan emitted by the Rust
-configuration; section titles, weights, metrics, formats, plots, tables, and
-compact-status tiles are not hardcoded in Swift. The current example uses short
-`perf`, `disk`, and `net` sections in a dense Conky-like layout. It remains
-shape-first and omits versions, protocol details, and status prose. Generic
-compact-status metrics render configured glyphs, a shape-and-color status mark,
-and age; other values use plan-driven text, gauges, plots, and tables.
+The Rust config may independently provide up to four optional surfaces:
+`desktop`, `widget_large`, `widget_medium`, and `widget_small`. Each has its own
+root, so a small widget is not a lossy resize of the desktop or large-widget
+tree. Missing kinds are simply disabled.
+
+Every root is a StickyWM-style immutable layout AST made from `stack`, `section`,
+`flow`, `split`, and `widget` nodes. The native solver is width-first: it derives
+flow columns and weighted split tracks from available width, measures natural and
+minimum height, and then packs the result. A split that cannot satisfy its track
+widths re-homes those tracks to a source-ordered vertical stack. Runtime metric
+values never affect geometry.
+
+The desktop surface is the Conky-like overlay. Its signed `x`/`y` position is
+measured from the main screen's top-left and its configured `width` drives the
+width-first solve; the natural AST height determines the panel height. The
+current example uses `.position(270.0, 0.0).width(400.0)`, transparent background,
+and click-through input. WidgetKit receives separate large, medium, and small
+roots built from the same node types.
+
+The renderer remains shape-first and omits versions, protocol details, and
+status prose. Generic compact-status metrics render configured glyphs, a
+shape-and-color status mark, and age; other leaves render plan-driven values,
+gauges, plots, and tables.
 
 - Cyan: CPU activity
 - Blue: GPU activity
@@ -51,10 +68,8 @@ and age; other values use plan-driven text, gauges, plots, and tables.
 - Purple: disk writes
 - Orange: disk usage
 
-The small family renders the highest-weight Rust section, medium arranges all
-sections in a grid, and large stacks every section according to its configured
-weight. Missing data leaves only quiet neutral marks; snapshots older than 45
-minutes fade.
+Each WidgetKit family renders only its explicitly configured Rust root. Missing
+data leaves quiet neutral marks; snapshots older than 45 minutes fade.
 Accessibility descriptions remain available to VoiceOver.
 
 macOS controls widget coloration. Choose **System Settings → Desktop & Dock →
@@ -78,10 +93,11 @@ file does not already exist. It also registers the embedded
 CLI at `~/.local/bin/wallstats`. Add Wallstats from macOS "Edit Widgets".
 Clicking the widget opens the active Rust configuration in its default editor.
 
-The WidgetKit timeline is intentionally low-frequency. The companion samples at
-the Rust configuration's cadence, coalesces snapshot writes to at most once per
-minute, and asks WidgetKit to reload at most once per 30 minutes. macOS retains
-final control over widget refresh budgets.
+The current example samples every two seconds while the desktop surface is
+enabled. If desktop is disabled, it switches to a 30-second cadence for the
+widget-only case, reducing streaming `macmon` wakeups and battery use. Snapshot
+writes are still coalesced to at most once per minute and normal WidgetKit reload
+requests to once per 30 minutes; macOS retains final control over widget budgets.
 
 ## Daily workflow
 
@@ -141,40 +157,54 @@ deduplicated in the Nix store.
 
 ## Configuration
 
-The complete working example is [examples/config.rs](examples/config.rs). Its
-layout reads like this:
+The complete working example is [examples/config.rs](examples/config.rs). The
+essential surface structure looks like this:
 
 ```rust
-let system = app.system(
-    SystemCollector::new()
-        .schedule(Schedule::every(Duration::from_secs(1)))
-        .top_processes(8),
-)?;
-let mac = app.macmon(MacmonCollector::new())?;
-let disk_io = app.disk_io(DiskIoCollector::new())?;
+let desktop_enabled = true;
+let sampling = if desktop_enabled {
+    Duration::from_secs(2)
+} else {
+    Duration::from_secs(30)
+};
+let mac = app.macmon(MacmonCollector::new().schedule(Schedule::every(sampling)))?;
 
-app.set_sections(sections![
-    Section::new("perf", widgets![
-        Stat::new("CPU", &mac.cpu_total).percent(),
-        Stat::new("GPU", &mac.gpu_ratio).percent(),
-        Stat::new("CPU °C", &mac.cpu_temperature).celsius(),
-        Stat::new("GPU °C", &mac.gpu_temperature).celsius(),
-        Plot::new("activity", vec![
-            PlotSeries::new(&mac.cpu_total, "cyan"),
-            PlotSeries::new(&mac.gpu_ratio, "blue"),
-            PlotSeries::new(&disk_io.read, "amber"),
-            PlotSeries::new(&disk_io.write, "purple"),
-        ]).history(90),
-    ]).weight(6),
-    Section::new("disk", widgets![
-        Stat::new("free", &system.root_disk_available).bytes(),
-        Gauge::new("used", &system.root_disk_ratio).percent(),
-    ]).weight(2),
-    Section::new("net", widgets![
-        Stat::new("down", &system.network_down).bytes_per_second(),
-        Stat::new("up", &system.network_up).bytes_per_second(),
-    ]).weight(1),
-]);
+let cpu = Widget::from(Stat::new("CPU", &mac.cpu_total).percent());
+let gpu = Widget::from(Stat::new("GPU", &mac.gpu_ratio).percent());
+let perf = LayoutNode::section(
+    "PERF",
+    Insets::symmetric(6.0, 8.0),
+    LayoutNode::flow(
+        6.0,
+        6.0,
+        72.0,
+        vec![LayoutNode::widget(cpu.clone()), LayoutNode::widget(gpu.clone())],
+    ),
+);
+
+let mut surfaces = Vec::new();
+if desktop_enabled {
+    surfaces.push(
+        Surface::desktop(LayoutNode::stack(10.0, vec![perf.clone()]))
+            .position(270.0, 0.0)
+            .width(400.0)
+            .background_opacity(0.0)
+            .click_through(true),
+    );
+}
+surfaces.push(Surface::widget_large(LayoutNode::stack(8.0, vec![perf])));
+surfaces.push(Surface::widget_medium(LayoutNode::split(
+    8.0,
+    140.0,
+    vec![LayoutTrack::new(1.0, LayoutNode::widget(cpu.clone()))],
+)));
+surfaces.push(Surface::widget_small(LayoutNode::flow(
+    4.0,
+    4.0,
+    62.0,
+    vec![LayoutNode::widget(cpu), LayoutNode::widget(gpu)],
+)));
+app.set_surfaces(surfaces);
 ```
 
 The important types are:
@@ -240,11 +270,12 @@ nix develop
 ./scripts/build-app.sh
 ```
 
-`check.sh` runs Rust tests and Clippy, compiles the example through the exact
-Nix helper under a Finder-like empty environment, runs Swift tests, generates
-the Xcode project, builds the host and WidgetKit extension with warnings as
-errors, and rejects visible text constructs in widget rendering sources. It
-does not launch the GUI.
+`check.sh` runs Rust tests and Clippy, compiles the four-surface example through
+the exact Nix helper under a Finder-like empty environment, verifies the helper
+process group and streaming-macmon cleanup, runs Swift tests, generates the Xcode
+project, builds the host and WidgetKit extension with warnings as errors, and
+guards the shared editorial renderer's visible controls. It does not launch the
+GUI.
 
 Useful collector-only checks:
 
@@ -264,6 +295,11 @@ request root. The companion remains unsandboxed so it can read configured logs;
 the WidgetKit extension is sandboxed. Both are signed with the same stable Apple
 Development identity and share only App Group
 `22GNLKBRMV.com.memorici.wallstats`.
+
+The embedded helper becomes a process-group leader before executing
+`rust-script`. The compiled config and its long-lived `macmon` child inherit that
+group, allowing reload and shutdown to terminate the full collector tree rather
+than orphaning hardware samplers.
 
 WidgetKit is intentionally not the collector. macOS launches extensions briefly
 under a sandbox and controls timeline budgets, so arbitrary Rust plugins and log

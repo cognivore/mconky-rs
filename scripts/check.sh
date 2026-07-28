@@ -56,23 +56,115 @@ if [[ ! -x "$runtime_helper" ]]; then
 fi
 
 temporary_dir="$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/wallstats-check.XXXXXX")"
+process_group_pid=
+once_group_pid=
 cleanup() {
+    for group in "$process_group_pid" "$once_group_pid"; do
+        if [[ -n "$group" ]]; then
+            /bin/kill -TERM "-$group" 2>/dev/null || true
+        fi
+    done
     /bin/rm -rf "$temporary_dir"
 }
 trap cleanup EXIT HUP INT TERM
+
+process_group_members() {
+    /bin/ps -axo pid=,pgid=,comm= \
+        | /usr/bin/awk -v group="$1" '$2 == group { print }'
+}
+
+wait_for_group_leader() {
+    local process_id=$1
+    local description=$2
+    local process_group
+
+    for _ in {1..100}; do
+        process_group="$(/bin/ps -p "$process_id" -o pgid= 2>/dev/null \
+            | /usr/bin/awk '{ print $1 }')"
+        if [[ "$process_group" == "$process_id" ]]; then
+            return
+        fi
+        if ! /bin/kill -0 "$process_id" 2>/dev/null; then
+            break
+        fi
+        /bin/sleep 0.05
+    done
+    echo "check: $description did not become process-group leader PID $process_id" >&2
+    return 1
+}
 
 (
     cd "$repo_root"
     /usr/bin/env -i HOME="$HOME" PATH=/usr/bin:/bin \
         "$runtime_helper" --force "$repo_root/examples/config.rs" -- --check \
         > "$temporary_dir/check.jsonl"
-    /usr/bin/env -i HOME="$HOME" PATH=/usr/bin:/bin \
-        "$runtime_helper" --force "$repo_root/examples/config.rs" -- --once \
-        > "$temporary_dir/once.jsonl"
-    /usr/bin/env -i HOME="$HOME" PATH=/usr/bin:/bin \
-        "$runtime_helper" --force "$script_dir/macmon-probe.rs" \
-        > "$temporary_dir/macmon-resolution.txt"
 )
+
+(
+    cd "$repo_root"
+    exec /usr/bin/env -i HOME="$HOME" PATH=/usr/bin:/bin \
+        "$runtime_helper" --force "$script_dir/process-group-probe.rs"
+) > "$temporary_dir/process-group.txt" 2> "$temporary_dir/process-group.err" &
+process_group_pid=$!
+wait_for_group_leader "$process_group_pid" "runtime helper"
+for _ in {1..100}; do
+    [[ -s "$temporary_dir/process-group.txt" ]] && break
+    /bin/sleep 0.05
+done
+if [[ ! -s "$temporary_dir/process-group.txt" ]]; then
+    echo "check: process-group config produced no identity output" >&2
+    /bin/cat "$temporary_dir/process-group.err" >&2
+    exit 1
+fi
+config_pid="$(/usr/bin/awk '{ for (i = 1; i <= NF; i++) { split($i, part, "="); if (part[1] == "pid") print part[2] } }' \
+    "$temporary_dir/process-group.txt")"
+config_pgid="$(/usr/bin/awk '{ for (i = 1; i <= NF; i++) { split($i, part, "="); if (part[1] == "pgid") print part[2] } }' \
+    "$temporary_dir/process-group.txt")"
+if [[ "$config_pgid" != "$process_group_pid" ]]; then
+    echo "check: config did not inherit helper process group $process_group_pid" >&2
+    /bin/cat "$temporary_dir/process-group.txt" >&2
+    exit 1
+fi
+if ! wait "$process_group_pid"; then
+    echo "check: process-group probe failed" >&2
+    /bin/cat "$temporary_dir/process-group.err" >&2
+    exit 1
+fi
+/bin/sleep 0.2
+remaining_group="$(process_group_members "$process_group_pid")"
+if [[ -n "$remaining_group" ]]; then
+    echo "check: process-group probe left descendants running" >&2
+    echo "$remaining_group" >&2
+    exit 1
+fi
+echo "Process-group probe: helper PID/PGID $process_group_pid; config PID $config_pid inherited PGID $config_pgid; clean exit."
+process_group_pid=
+
+(
+    cd "$repo_root"
+    exec /usr/bin/env -i HOME="$HOME" PATH=/usr/bin:/bin \
+        "$runtime_helper" --force "$repo_root/examples/config.rs" -- --once
+) > "$temporary_dir/once.jsonl" 2> "$temporary_dir/once.err" &
+once_group_pid=$!
+wait_for_group_leader "$once_group_pid" "forced example"
+if ! wait "$once_group_pid"; then
+    echo "check: forced example --once failed" >&2
+    /bin/cat "$temporary_dir/once.err" >&2
+    exit 1
+fi
+/bin/sleep 0.2
+remaining_group="$(process_group_members "$once_group_pid")"
+if [[ -n "$remaining_group" ]]; then
+    echo "check: forced example left streaming macmon descendants running" >&2
+    echo "$remaining_group" >&2
+    exit 1
+fi
+echo "Streaming macmon probe: process group $once_group_pid exited with no remaining descendants."
+once_group_pid=
+
+/usr/bin/env -i HOME="$HOME" PATH=/usr/bin:/bin \
+    "$runtime_helper" --force "$script_dir/macmon-probe.rs" \
+    > "$temporary_dir/macmon-resolution.txt"
 
 if [[ ! -s "$temporary_dir/check.jsonl" || ! -s "$temporary_dir/once.jsonl" ]]; then
     echo "check: rust-script checks produced no protocol output" >&2
@@ -85,12 +177,25 @@ if ! /usr/bin/grep -Eq \
     /bin/cat "$temporary_dir/macmon-resolution.txt" >&2
     exit 1
 fi
-if ! /usr/bin/grep -Fq '"type":"plan"' "$temporary_dir/once.jsonl" \
-    || ! /usr/bin/grep -Fq '"sections":[{' "$temporary_dir/once.jsonl" \
-    || ! /usr/bin/grep -Fq '"widgets":[{' "$temporary_dir/once.jsonl"; then
-    echo "check: forced example produced no nonempty render plan" >&2
-    exit 1
-fi
+for protocol_output in "$temporary_dir/check.jsonl" "$temporary_dir/once.jsonl"; do
+    if ! /usr/bin/grep -Fq '"type":"plan"' "$protocol_output" \
+        || ! /usr/bin/grep -Fq '"surfaces":[{' "$protocol_output"; then
+        echo "check: forced example produced no nonempty surfaces array" >&2
+        exit 1
+    fi
+    for surface_kind in desktop widget_large widget_medium widget_small; do
+        if ! /usr/bin/grep -Fq "\"kind\":\"$surface_kind\"" "$protocol_output"; then
+            echo "check: forced example is missing $surface_kind surface" >&2
+            exit 1
+        fi
+    done
+    for layout_kind in stack section flow split widget; do
+        if ! /usr/bin/grep -Fq "\"kind\":\"$layout_kind\"" "$protocol_output"; then
+            echo "check: forced example is missing $layout_kind layout node" >&2
+            exit 1
+        fi
+    done
+done
 for metric in \
     macmon.cpu.total \
     macmon.gpu.ratio \
@@ -106,45 +211,29 @@ for metric in \
 done
 
 widget_sources=("$repo_root/macos/Sources/WallstatsWidget/"*.swift)
-generic_renderer_source="$repo_root/macos/Sources/WallstatsWidget/GenericWidgetRenderer.swift"
-compact_tile_source="$repo_root/macos/Sources/WallstatsWidget/CompactStatusTile.swift"
-outlined_section_source="$repo_root/macos/Sources/WallstatsWidget/OutlinedSection.swift"
-text_free_widget_sources=()
-for source in "${widget_sources[@]}"; do
-    if [[ "$source" != "$generic_renderer_source" \
-        && "$source" != "$compact_tile_source" \
-        && "$source" != "$outlined_section_source" ]]; then
-        text_free_widget_sources+=("$source")
-    fi
-done
+editorial_renderer_source="$repo_root/macos/Sources/WallstatsCore/EditorialSurfaceView.swift"
+render_sources=("${widget_sources[@]}" "$editorial_renderer_source")
 if /usr/bin/grep -En \
     '(^|[^[:alnum:]_])(Label|Image|Gauge|ProgressView)[[:space:]]*\(' \
-    "${widget_sources[@]}"; then
-    echo "check: widget source contains a prohibited visible view type" >&2
+    "${render_sources[@]}"; then
+    echo "check: render source contains a prohibited visible view type" >&2
     exit 1
 fi
 if /usr/bin/grep -En \
     '(^|[^[:alnum:]_])Text[[:space:]]*\(' \
-    "${text_free_widget_sources[@]}"; then
-    echo "check: visible Text appears outside the three approved widget files" >&2
+    "${widget_sources[@]}"; then
+    echo "check: WallstatsWidget sources must not contain direct Text calls" >&2
     exit 1
 fi
-for source_and_count in \
-    "$generic_renderer_source:7" \
-    "$compact_tile_source:3" \
-    "$outlined_section_source:1"; do
-    source=${source_and_count%:*}
-    expected_count=${source_and_count##*:}
-    actual_count="$(/usr/bin/grep -Ec \
-        '(^|[^[:alnum:]_])Text[[:space:]]*\(' "$source")"
-    if [[ "$actual_count" -ne "$expected_count" ]]; then
-        echo "check: $(basename "$source") must contain exactly $expected_count Text calls" >&2
-        exit 1
-    fi
-done
+editorial_text_count="$(/usr/bin/grep -Ec \
+    '(^|[^[:alnum:]_])Text[[:space:]]*\(' "$editorial_renderer_source")"
+if [[ "$editorial_text_count" -ne 11 ]]; then
+    echo "check: EditorialSurfaceView.swift must contain exactly 11 Text calls" >&2
+    exit 1
+fi
 if /usr/bin/grep -Ein '"[^"]*(version|protocol|header|footer)[^"]*"' \
-    "${widget_sources[@]}"; then
-    echo "check: widget source contains a visible version/protocol/header/footer string" >&2
+    "${render_sources[@]}"; then
+    echo "check: render source contains a visible version/protocol/header/footer string" >&2
     exit 1
 fi
 

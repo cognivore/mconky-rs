@@ -296,6 +296,7 @@ actor WidgetSnapshotPublisher: WidgetSnapshotPublishing {
 private extension WidgetSnapshot {
     func hasSameWidgetData(as other: WidgetSnapshot) -> Bool {
         schemaVersion == other.schemaVersion
+            && widgetSurfaces == other.widgetSurfaces
             && renderPlan == other.renderPlan
             && metrics.count == other.metrics.count
             && zip(metrics, other.metrics).allSatisfy { left, right in

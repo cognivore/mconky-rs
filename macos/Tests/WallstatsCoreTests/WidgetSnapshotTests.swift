@@ -21,6 +21,7 @@ struct WidgetSnapshotTests {
         )
         #expect(plist["p"] != nil)
         #expect(plist["m"] != nil)
+        #expect(plist["u"] != nil)
     }
 
     @Test("Corrupt and oversized snapshots are rejected")
@@ -119,8 +120,8 @@ struct WidgetSnapshotTests {
         }
 
         let snapshot = try WidgetSnapshot(dashboard: dashboard, sampledAt: Date())
-        #expect(snapshot.renderPlan.sections.map(\.title) == ["signals", "status"])
-        #expect(snapshot.renderPlan.sections.map(\.weight) == [3, 1])
+        #expect(snapshot.widgetSurfaces.map(\.kind) == [.widgetLarge, .widgetSmall])
+        #expect(snapshot.renderPlan.sections.isEmpty)
         #expect(snapshot.metrics.map(\.metricID) == ["cpu", "temperature", "sync"])
         #expect(snapshot.metrics.first(where: { $0.metricID == "cpu" })?.history.count == 60)
         #expect(snapshot.metrics.contains(where: { $0.metricID == "unused" }) == false)
@@ -183,6 +184,15 @@ struct WidgetSnapshotTests {
                 error: nil,
                 timestampMS: 1_700_000_000_000,
                 history: [0.2, 0.4, 0.42]
+            )],
+            widgetSurfaces: [SurfacePlan(
+                kind: .widgetLarge,
+                root: .widget(WidgetPlan(
+                    kind: .plot,
+                    label: "activity",
+                    history: 60,
+                    series: [PlotSeries(metric: "cpu", format: .percent, accent: "cyan")]
+                ))
             )]
         )
     }
@@ -219,6 +229,47 @@ struct WidgetSnapshotTests {
                         format: .compactStatus
                     ),
                 ]),
+            ],
+            surfaces: [
+                SurfacePlan(
+                    kind: .desktop,
+                    root: .widget(WidgetPlan(
+                        kind: .value,
+                        label: "unused",
+                        metric: "unused",
+                        format: .count
+                    )),
+                    x: 0,
+                    y: 0,
+                    width: 300,
+                    backgroundOpacity: 0,
+                    clickThrough: true
+                ),
+                SurfacePlan(
+                    kind: .widgetLarge,
+                    root: .section(
+                        title: "signals",
+                        insets: .zero,
+                        child: .widget(WidgetPlan(
+                            kind: .plot,
+                            label: "activity",
+                            history: history,
+                            series: [
+                                PlotSeries(metric: "cpu", format: .percent, accent: "cyan"),
+                                PlotSeries(metric: "temperature", format: .celsius, accent: "amber"),
+                            ]
+                        ))
+                    )
+                ),
+                SurfacePlan(
+                    kind: .widgetSmall,
+                    root: .widget(WidgetPlan(
+                        kind: .compactStatus,
+                        label: "sync",
+                        metric: "sync",
+                        format: .compactStatus
+                    ))
+                ),
             ]
         )
     }

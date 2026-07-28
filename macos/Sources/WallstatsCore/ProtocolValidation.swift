@@ -11,6 +11,7 @@ public enum ProtocolValidationError: Error, Equatable, Sendable {
     case unknownMetricReference(String)
     case invalidHistory(metric: String)
     case invalidSectionWeight(section: String)
+    case invalidSurface(String)
     case incompatibleWidget(metric: String, reason: String)
     case duplicateUpdateMetric(String)
     case invalidUpdate(metric: String, reason: String)
@@ -43,6 +44,8 @@ extension ProtocolValidationError: LocalizedError {
             "Sparkline for metric '\(metric)' must specify a positive history."
         case let .invalidSectionWeight(section):
             "Section '\(section)' must have a weight from 1 through 16."
+        case let .invalidSurface(reason):
+            "Invalid surface: \(reason)."
         case let .incompatibleWidget(metric, reason):
             "Invalid widget for metric '\(metric)': \(reason)."
         case let .duplicateUpdateMetric(metric):
@@ -101,62 +104,25 @@ public enum ProtocolValidator {
                 throw ProtocolValidationError.invalidSectionWeight(section: section.title)
             }
             for widget in section.widgets {
-                if widget.kind == .plot {
-                    try validatePlot(widget, metricTypes: metricTypes)
-                    continue
-                }
-                guard let valueType = metricTypes[widget.metric] else {
-                    throw ProtocolValidationError.unknownMetricReference(widget.metric)
-                }
-                if widget.kind == .sparkline, widget.history == nil || widget.history! <= 0 {
-                    throw ProtocolValidationError.invalidHistory(metric: widget.metric)
-                }
-                if let history = widget.history, history <= 0 {
-                    throw ProtocolValidationError.invalidHistory(metric: widget.metric)
-                }
-                if widget.kind == .compactStatus {
-                    guard valueType == .compactStatus, widget.format == .compactStatus else {
-                        throw ProtocolValidationError.incompatibleWidget(
-                            metric: widget.metric,
-                            reason: "compact_status widgets require a compact_status metric and format"
-                        )
-                    }
-                    continue
-                }
-                if valueType == .compactStatus || widget.format == .compactStatus {
-                    throw ProtocolValidationError.incompatibleWidget(
-                        metric: widget.metric,
-                        reason: "compact_status is available only to native compact status surfaces"
-                    )
-                }
-                if widget.kind == .sparkline,
-                   ![MetricValueType.ratio, .bytes, .bytesPerSecond, .count, .durationSeconds, .number]
-                    .contains(valueType)
-                {
-                    throw ProtocolValidationError.incompatibleWidget(
-                        metric: widget.metric,
-                        reason: "sparklines require a numeric value"
-                    )
-                }
-                if widget.kind == .gauge, valueType != .ratio {
-                    throw ProtocolValidationError.incompatibleWidget(
-                        metric: widget.metric,
-                        reason: "gauges require a ratio value"
-                    )
-                }
-                if widget.kind == .table, valueType != .table {
-                    throw ProtocolValidationError.incompatibleWidget(
-                        metric: widget.metric,
-                        reason: "table widgets require a table value"
-                    )
-                }
-                guard isCompatible(format: widget.format, valueType: valueType) else {
-                    throw ProtocolValidationError.incompatibleWidget(
-                        metric: widget.metric,
-                        reason: "format \(widget.format.rawValue) is incompatible with \(valueType.rawValue)"
-                    )
-                }
+                try validateWidget(widget, metricTypes: metricTypes)
             }
+        }
+
+        var surfaceKinds: Set<SurfaceKind> = []
+        for surface in plan.surfaces {
+            guard surfaceKinds.insert(surface.kind).inserted else {
+                throw ProtocolValidationError.invalidSurface(
+                    "surface kind \(surface.kind.rawValue) appears more than once"
+                )
+            }
+            try validateSurfaceGeometry(surface)
+            var nodeCount = 0
+            try validateLayoutNode(
+                surface.root,
+                depth: 1,
+                nodeCount: &nodeCount,
+                metricTypes: metricTypes
+            )
         }
     }
 
@@ -406,6 +372,183 @@ public enum ProtocolValidator {
                     reason: "plot series require compatible scalar metrics and formats"
                 )
             }
+        }
+    }
+
+    private static func validateWidget(
+        _ widget: WidgetPlan,
+        metricTypes: [String: MetricValueType]
+    ) throws {
+        if widget.kind == .plot {
+            try validatePlot(widget, metricTypes: metricTypes)
+            return
+        }
+        guard let valueType = metricTypes[widget.metric] else {
+            throw ProtocolValidationError.unknownMetricReference(widget.metric)
+        }
+        if widget.kind == .sparkline, widget.history == nil || widget.history! <= 0 {
+            throw ProtocolValidationError.invalidHistory(metric: widget.metric)
+        }
+        if let history = widget.history, history <= 0 {
+            throw ProtocolValidationError.invalidHistory(metric: widget.metric)
+        }
+        if widget.kind == .compactStatus {
+            guard valueType == .compactStatus, widget.format == .compactStatus else {
+                throw ProtocolValidationError.incompatibleWidget(
+                    metric: widget.metric,
+                    reason: "compact_status widgets require a compact_status metric and format"
+                )
+            }
+            return
+        }
+        if valueType == .compactStatus || widget.format == .compactStatus {
+            throw ProtocolValidationError.incompatibleWidget(
+                metric: widget.metric,
+                reason: "compact_status is available only to native compact status surfaces"
+            )
+        }
+        if widget.kind == .sparkline,
+           ![MetricValueType.ratio, .bytes, .bytesPerSecond, .count, .durationSeconds, .number]
+            .contains(valueType)
+        {
+            throw ProtocolValidationError.incompatibleWidget(
+                metric: widget.metric,
+                reason: "sparklines require a numeric value"
+            )
+        }
+        if widget.kind == .gauge, valueType != .ratio {
+            throw ProtocolValidationError.incompatibleWidget(
+                metric: widget.metric,
+                reason: "gauges require a ratio value"
+            )
+        }
+        if widget.kind == .table, valueType != .table {
+            throw ProtocolValidationError.incompatibleWidget(
+                metric: widget.metric,
+                reason: "table widgets require a table value"
+            )
+        }
+        guard isCompatible(format: widget.format, valueType: valueType) else {
+            throw ProtocolValidationError.incompatibleWidget(
+                metric: widget.metric,
+                reason: "format \(widget.format.rawValue) is incompatible with \(valueType.rawValue)"
+            )
+        }
+    }
+
+    private static func validateSurfaceGeometry(_ surface: SurfacePlan) throws {
+        switch surface.kind {
+        case .desktop:
+            guard let x = surface.x, x.isFinite,
+                  let y = surface.y, y.isFinite,
+                  let width = surface.width, width.isFinite, width > 0,
+                  let opacity = surface.backgroundOpacity,
+                  opacity.isFinite, (0 ... 1).contains(opacity),
+                  surface.clickThrough != nil
+            else {
+                throw ProtocolValidationError.invalidSurface(
+                    "desktop geometry must be complete, finite, and nonnegative"
+                )
+            }
+        case .widgetLarge, .widgetMedium, .widgetSmall:
+            guard surface.x == nil,
+                  surface.y == nil,
+                  surface.width == nil,
+                  surface.backgroundOpacity == nil,
+                  surface.clickThrough == nil
+            else {
+                throw ProtocolValidationError.invalidSurface(
+                    "widget surfaces cannot contain desktop geometry"
+                )
+            }
+        }
+    }
+
+    private static func validateLayoutNode(
+        _ node: LayoutNode,
+        depth: Int,
+        nodeCount: inout Int,
+        metricTypes: [String: MetricValueType]
+    ) throws {
+        guard depth <= 32 else {
+            throw ProtocolValidationError.invalidSurface("layout depth exceeds 32")
+        }
+        nodeCount += 1
+        guard nodeCount <= 256 else {
+            throw ProtocolValidationError.invalidSurface("layout node count exceeds 256")
+        }
+
+        switch node {
+        case let .widget(widget):
+            try validateWidget(widget, metricTypes: metricTypes)
+        case let .section(title, insets, child):
+            guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ProtocolValidationError.invalidSurface("section title cannot be empty")
+            }
+            for value in [insets.top, insets.right, insets.bottom, insets.left] {
+                try validateLayoutDimension(value)
+            }
+            try validateLayoutNode(
+                child,
+                depth: depth + 1,
+                nodeCount: &nodeCount,
+                metricTypes: metricTypes
+            )
+        case let .stack(gap, children):
+            try validateLayoutDimension(gap)
+            guard !children.isEmpty else {
+                throw ProtocolValidationError.invalidSurface("stack children cannot be empty")
+            }
+            for child in children {
+                try validateLayoutNode(
+                    child,
+                    depth: depth + 1,
+                    nodeCount: &nodeCount,
+                    metricTypes: metricTypes
+                )
+            }
+        case let .split(gap, minimumTrackWidth, tracks):
+            try validateLayoutDimension(gap)
+            try validateLayoutDimension(minimumTrackWidth)
+            guard !tracks.isEmpty else {
+                throw ProtocolValidationError.invalidSurface("split tracks cannot be empty")
+            }
+            for track in tracks {
+                guard track.weight.isFinite, track.weight > 0 else {
+                    throw ProtocolValidationError.invalidSurface(
+                        "split track weights must be finite and positive"
+                    )
+                }
+                try validateLayoutNode(
+                    track.child,
+                    depth: depth + 1,
+                    nodeCount: &nodeCount,
+                    metricTypes: metricTypes
+                )
+            }
+        case let .flow(horizontalGap, verticalGap, minimumItemWidth, children):
+            try validateLayoutDimension(horizontalGap)
+            try validateLayoutDimension(verticalGap)
+            try validateLayoutDimension(minimumItemWidth)
+            guard !children.isEmpty else {
+                throw ProtocolValidationError.invalidSurface("flow children cannot be empty")
+            }
+            for child in children {
+                try validateLayoutNode(
+                    child,
+                    depth: depth + 1,
+                    nodeCount: &nodeCount,
+                    metricTypes: metricTypes
+                )
+            }
+        }
+    }
+
+    private static func validateLayoutDimension(_ value: Double) throws {
+        guard value.isFinite, value >= 0 else {
+            throw ProtocolValidationError.invalidSurface(
+                "layout dimensions must be finite and nonnegative"
+            )
         }
     }
 }

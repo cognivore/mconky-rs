@@ -63,6 +63,7 @@
             #include <stdio.h>
             #include <stdlib.h>
             #include <string.h>
+            #include <sys/types.h>
             #include <unistd.h>
 
             struct environment_entry {
@@ -99,6 +100,15 @@
                     if (setenv(environment[index].name, environment[index].value, 1) != 0) {
                         fprintf(stderr, "wallstats-rust-script: cannot set %s: %s\n",
                                 environment[index].name, strerror(errno));
+                        return 126;
+                    }
+                }
+
+                if (setpgid(0, 0) != 0) {
+                    const int error = errno;
+                    if (getpgrp() != getpid()) {
+                        fprintf(stderr, "wallstats-rust-script: cannot establish process group: %s\n",
+                                strerror(error));
                         return 126;
                     }
                 }

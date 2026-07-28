@@ -13,6 +13,7 @@ mod collector;
 mod disk_io;
 mod error;
 mod id;
+mod layout;
 mod macmon;
 mod metric;
 mod system;
@@ -27,6 +28,7 @@ pub use collector::{
 pub use disk_io::{DiskIoCollector, DiskIoMetrics};
 pub use error::{ConfigError, Error, Result};
 pub use id::{MetricId, MetricIdError};
+pub use layout::{Insets, LayoutNode, LayoutTrack, Surface, SurfaceKind};
 pub use macmon::{MacmonCollector, MacmonMetrics};
 pub use metric::{
     Boolean, Bytes, BytesPerSecond, CompactStatus, CompactStatusValue, CompactStatusValueError,
@@ -88,5 +90,13 @@ macro_rules! sections {
     };
     ($($section:expr),* $(,)?) => {
         ::std::vec![$($section),*]
+    };
+}
+
+/// Builds a `Vec<Surface>` for [`App::set_surfaces`].
+#[macro_export]
+macro_rules! surfaces {
+    ($($surface:expr),* $(,)?) => {
+        ::std::vec![$($surface),*]
     };
 }

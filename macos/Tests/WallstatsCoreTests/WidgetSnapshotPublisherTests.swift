@@ -321,7 +321,33 @@ struct WidgetSnapshotPublisherTests {
                         ),
                     ]),
                     SectionPlan(title: "empty", widgets: []),
-                ]
+                ],
+                surfaces: [SurfacePlan(
+                    kind: .widgetMedium,
+                    root: .stack(gap: 4, children: [
+                        .widget(WidgetPlan(
+                            kind: .plot,
+                            label: "io + cpu",
+                            history: 60,
+                            series: [
+                                PlotSeries(metric: "disk.io", format: .bytesPerSecond),
+                                PlotSeries(metric: "macmon.cpu", format: .percent),
+                            ]
+                        )),
+                        .widget(WidgetPlan(
+                            kind: .gauge,
+                            label: "cpu duplicate",
+                            metric: "macmon.cpu",
+                            format: .percent
+                        )),
+                        .widget(WidgetPlan(
+                            kind: .compactStatus,
+                            label: "sync",
+                            metric: "sync",
+                            format: .compactStatus
+                        )),
+                    ])
+                )]
             )
             try model.accept(.plan(plan))
             try model.accept(.update(UpdateMessage(
@@ -490,7 +516,16 @@ struct WidgetSnapshotPublisherTests {
                     metric: "cpu.total",
                     format: .percent
                 ),
-            ])]
+            ])],
+            surfaces: [SurfacePlan(
+                kind: .widgetSmall,
+                root: .widget(WidgetPlan(
+                    kind: .value,
+                    label: "cpu",
+                    metric: "cpu.total",
+                    format: .percent
+                ))
+            )]
         )
     }
 
@@ -542,7 +577,31 @@ struct WidgetSnapshotPublisherTests {
                         format: .compactStatus
                     ),
                 ]),
-            ] : [])
+            ] : []),
+            surfaces: [SurfacePlan(
+                kind: .widgetMedium,
+                root: .stack(gap: 4, children: [
+                    .widget(WidgetPlan(
+                        kind: .plot,
+                        label: "system",
+                        history: 60,
+                        series: [
+                            PlotSeries(metric: "cpu.total", format: .percent),
+                            PlotSeries(metric: "memory.ratio", format: .percent),
+                            PlotSeries(metric: "disk.root.ratio", format: .percent),
+                            PlotSeries(metric: "network.down", format: .bytesPerSecond),
+                            PlotSeries(metric: "network.up", format: .bytesPerSecond),
+                        ]
+                    )),
+                ] + (includeCompactStatus ? [
+                    .widget(WidgetPlan(
+                        kind: .compactStatus,
+                        label: "sync",
+                        metric: "sync.summary",
+                        format: .compactStatus
+                    )),
+                ] : []))
+            )]
         )
     }
 

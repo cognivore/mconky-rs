@@ -49,8 +49,8 @@ widget_executable="$(plist_value "$widget_info" CFBundleExecutable)"
     || fail "wrong host package type"
 [[ "$(plist_value "$host_info" LSUIElement)" == true ]] \
     || fail "host must set LSUIElement=true"
-[[ "$(plist_value "$host_info" CFBundleVersion)" == 6 ]] || fail "host build number must be 6"
-[[ "$(plist_value "$widget_info" CFBundleVersion)" == 6 ]] || fail "widget build number must be 6"
+[[ "$(plist_value "$host_info" CFBundleVersion)" == 7 ]] || fail "host build number must be 7"
+[[ "$(plist_value "$widget_info" CFBundleVersion)" == 7 ]] || fail "widget build number must be 7"
 [[ "$(plist_value "$host_info" CFBundleURLTypes)" == 1 ]] \
     || fail "host must declare exactly one URL type"
 [[ "$(plist_value "$host_info" CFBundleURLTypes.0.CFBundleTypeRole)" == Editor ]] \

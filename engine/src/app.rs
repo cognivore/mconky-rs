@@ -12,7 +12,7 @@ use crate::system::{
 use crate::widget::Section;
 use crate::{
     MAX_PROTOCOL_RECORD_BYTES, Metric, MetricId, PROTOCOL_MAJOR, PROTOCOL_MINOR, SDK_VERSION,
-    WireType,
+    Surface, WireType,
 };
 use serde::Serialize;
 use std::any::Any;
@@ -211,6 +211,7 @@ pub struct App {
     sources: Vec<Box<dyn Source>>,
     window: Window,
     sections: Vec<Section>,
+    surfaces: Vec<Surface>,
 }
 
 impl App {
@@ -222,6 +223,7 @@ impl App {
             sources: Vec::new(),
             window: Window::default(),
             sections: Vec::new(),
+            surfaces: Vec::new(),
         }
     }
 
@@ -234,6 +236,12 @@ impl App {
     /// Replaces the section layout.
     pub fn set_sections(&mut self, sections: Vec<Section>) -> &mut Self {
         self.sections = sections;
+        self
+    }
+
+    /// Replaces the immutable editorial surface trees.
+    pub fn set_surfaces(&mut self, surfaces: Vec<Surface>) -> &mut Self {
+        self.surfaces = surfaces;
         self
     }
 
@@ -353,9 +361,9 @@ impl App {
                 "at least one metric must be registered".to_owned(),
             ));
         }
-        if self.sections.is_empty() {
+        if self.sections.is_empty() && self.surfaces.is_empty() {
             return Err(ConfigError::InvalidLayout(
-                "at least one section must be configured".to_owned(),
+                "at least one legacy section or surface must be configured".to_owned(),
             ));
         }
         self.window.validate()?;
@@ -391,6 +399,16 @@ impl App {
                     }
                 }
             }
+        }
+        let mut surface_kinds = HashSet::with_capacity(self.surfaces.len());
+        for surface in &self.surfaces {
+            if !surface_kinds.insert(surface.kind()) {
+                return Err(ConfigError::InvalidLayout(format!(
+                    "surface kind {:?} is duplicated",
+                    surface.kind()
+                )));
+            }
+            surface.validate(&registered)?;
         }
         Ok(())
     }
@@ -442,6 +460,7 @@ impl App {
                 metrics: &self.metrics,
                 window: &self.window,
                 sections: &self.sections,
+                surfaces: &self.surfaces,
             },
         )
     }
@@ -659,6 +678,7 @@ struct Plan<'a> {
     metrics: &'a [MetricDefinition],
     window: &'a Window,
     sections: &'a [Section],
+    surfaces: &'a [Surface],
 }
 
 #[derive(Serialize)]
@@ -703,8 +723,8 @@ enum WorkerMessage {
 mod tests {
     use super::{App, Mode, Schedule, write_record};
     use crate::{
-        ConfigError, Count, Error, MAX_PROTOCOL_RECORD_BYTES, Plot, PlotSeries, Ratio, Section,
-        Stat, widgets,
+        ConfigError, Count, Error, LayoutNode, MAX_PROTOCOL_RECORD_BYTES, Plot, PlotSeries, Ratio,
+        Section, Stat, Surface, widgets,
     };
     use serde::Serialize;
     use serde_json::Value;
@@ -770,6 +790,22 @@ mod tests {
             second.validate(),
             Err(ConfigError::UnknownMetricReference { .. })
         ));
+    }
+
+    #[test]
+    fn surface_only_apps_are_valid_and_duplicate_kinds_are_rejected() {
+        let mut app = App::new("Surface");
+        let cpu = app
+            .metric::<Ratio>("cpu", schedule(), || Ok(0.5))
+            .unwrap();
+        let root = LayoutNode::widget(Stat::new("CPU", cpu).percent());
+        app.set_surfaces(vec![Surface::widget_small(root.clone())]);
+        assert!(app.validate().is_ok());
+        app.set_surfaces(vec![
+            Surface::widget_small(root.clone()),
+            Surface::widget_small(root),
+        ]);
+        assert!(matches!(app.validate(), Err(ConfigError::InvalidLayout(_))));
     }
 
     #[test]

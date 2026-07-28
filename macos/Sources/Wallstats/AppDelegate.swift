@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import WallstatsCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -9,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var supervisor: CollectorSupervisor?
     private var configWatcher: ConfigFileWatcher?
     private var configURLCancellable: AnyCancellable?
+    private var planCancellable: AnyCancellable?
+    private var desktopPanelController: DashboardPanelController?
     private var awaitingTerminationReply = false
 
     override init() {
@@ -54,6 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak watcher] url in
                 watcher?.watch(url)
             }
+        planCancellable = model.$plan.sink { [weak self] plan in
+            self?.updateDesktopSurface(plan)
+        }
         supervisor.start()
     }
 
@@ -138,6 +144,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 level: .error,
                 message: "Could not open the Wallstats configuration: \(error.localizedDescription)"
             )
+        }
+    }
+
+    private func updateDesktopSurface(_ plan: DashboardPlan?) {
+        guard let surface = plan?.surfaces.first(where: { $0.kind == .desktop }) else {
+            desktopPanelController?.hide()
+            desktopPanelController = nil
+            return
+        }
+        if let desktopPanelController {
+            desktopPanelController.update(surface: surface)
+        } else {
+            desktopPanelController = DashboardPanelController(model: model, surface: surface)
         }
     }
 }

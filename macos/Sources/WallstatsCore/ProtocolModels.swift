@@ -228,17 +228,48 @@ public struct DashboardPlan: Codable, Equatable, Sendable {
     public let metrics: [MetricDefinition]
     public let window: WindowPlan
     public let sections: [SectionPlan]
+    public let surfaces: [SurfacePlan]
 
     public init(
         title: String,
         metrics: [MetricDefinition],
         window: WindowPlan,
-        sections: [SectionPlan]
+        sections: [SectionPlan],
+        surfaces: [SurfacePlan] = []
     ) {
         self.title = title
         self.metrics = metrics
         self.window = window
         self.sections = sections
+        self.surfaces = surfaces
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case title
+        case metrics
+        case window
+        case sections
+        case surfaces
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decode(String.self, forKey: .title)
+        metrics = try container.decode([MetricDefinition].self, forKey: .metrics)
+        window = try container.decode(WindowPlan.self, forKey: .window)
+        sections = try container.decodeIfPresent([SectionPlan].self, forKey: .sections) ?? []
+        surfaces = try container.decodeIfPresent([SurfacePlan].self, forKey: .surfaces) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(title, forKey: .title)
+        try container.encode(metrics, forKey: .metrics)
+        try container.encode(window, forKey: .window)
+        try container.encode(sections, forKey: .sections)
+        if !surfaces.isEmpty {
+            try container.encode(surfaces, forKey: .surfaces)
+        }
     }
 }
 
