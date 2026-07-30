@@ -5,19 +5,47 @@ final class ConfigFileWatcher: @unchecked Sendable {
 
     private struct Fingerprint: Equatable {
         struct ContentIdentity: Equatable {
+            let path: String
             let exists: Bool
             let size: UInt64?
             let hash: UInt64?
         }
 
-        let content: ContentIdentity
-        let modificationDate: Date?
-        let fileNumber: UInt64?
+        struct FileIdentity: Equatable {
+            let content: ContentIdentity
+            let modificationDate: Date?
+            let fileNumber: UInt64?
+        }
 
-        static func read(_ url: URL, fileManager: FileManager = .default) -> Fingerprint {
+        let files: [FileIdentity]
+
+        var content: [ContentIdentity] {
+            files.map(\.content)
+        }
+
+        static func read(_ configURL: URL, fileManager: FileManager = .default) -> Fingerprint {
+            let configURL = configURL.standardizedFileURL
+            var urls = rustSourceURLs(beside: configURL, fileManager: fileManager)
+            if !urls.contains(configURL) {
+                urls.append(configURL)
+            }
+            urls.sort { $0.path < $1.path }
+
+            return Fingerprint(files: urls.map { readFile($0, fileManager: fileManager) })
+        }
+
+        private static func readFile(
+            _ url: URL,
+            fileManager: FileManager
+        ) -> FileIdentity {
             guard fileManager.fileExists(atPath: url.path) else {
-                return Fingerprint(
-                    content: ContentIdentity(exists: false, size: nil, hash: nil),
+                return FileIdentity(
+                    content: ContentIdentity(
+                        path: url.path,
+                        exists: false,
+                        size: nil,
+                        hash: nil
+                    ),
                     modificationDate: nil,
                     fileNumber: nil
                 )
@@ -25,8 +53,9 @@ final class ConfigFileWatcher: @unchecked Sendable {
 
             let attributes = try? fileManager.attributesOfItem(atPath: url.path)
             let data = try? Data(contentsOf: url, options: .mappedIfSafe)
-            return Fingerprint(
+            return FileIdentity(
                 content: ContentIdentity(
+                    path: url.path,
                     exists: true,
                     size: (attributes?[.size] as? NSNumber)?.uint64Value,
                     hash: data.map(stableHash)
@@ -34,6 +63,42 @@ final class ConfigFileWatcher: @unchecked Sendable {
                 modificationDate: attributes?[.modificationDate] as? Date,
                 fileNumber: (attributes?[.systemFileNumber] as? NSNumber)?.uint64Value
             )
+        }
+
+        private static func rustSourceURLs(
+            beside configURL: URL,
+            fileManager: FileManager
+        ) -> [URL] {
+            let directoryURL = configURL.deletingLastPathComponent()
+            guard let enumerator = fileManager.enumerator(
+                at: directoryURL,
+                includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else {
+                return []
+            }
+
+            return enumerator.compactMap { item in
+                guard let url = item as? URL else {
+                    return nil
+                }
+                let values = try? url.resourceValues(
+                    forKeys: [.isDirectoryKey, .isRegularFileKey]
+                )
+                if values?.isDirectory == true {
+                    if url.lastPathComponent == "target" {
+                        enumerator.skipDescendants()
+                    }
+                    return nil
+                }
+                guard
+                      url.pathExtension == "rs",
+                      values?.isRegularFile == true
+                else {
+                    return nil
+                }
+                return url.standardizedFileURL
+            }
         }
 
         private static func stableHash(_ data: Data) -> UInt64 {

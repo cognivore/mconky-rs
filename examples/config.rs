@@ -76,49 +76,57 @@ fn configure() -> Result<App, Box<dyn Error>> {
         },
     )?;
 
-    let cpu = Widget::from(Stat::new("CPU", &mac.cpu_total).percent());
-    let gpu = Widget::from(Stat::new("GPU", &mac.gpu_ratio).percent());
+    let cpu = Widget::from(Stat::new("CPU load", &mac.cpu_total).percent());
+    let gpu = Widget::from(Stat::new("GPU load", &mac.gpu_ratio).percent());
     let gpu_frequency = Widget::from(Stat::new("GPU MHz", &mac.gpu_frequency).megahertz());
     let cpu_temp = Widget::from(Stat::new("CPU °C", &mac.cpu_temperature).celsius());
     let gpu_temp = Widget::from(Stat::new("GPU °C", &mac.gpu_temperature).celsius());
-    let p_ratio = Widget::from(Stat::new("P", &mac.p_cpu_ratio).percent());
+    let p_ratio = Widget::from(Stat::new("P-core load", &mac.p_cpu_ratio).percent());
     let p_frequency = Widget::from(Stat::new("P MHz", &mac.p_cpu_frequency).megahertz());
-    let e_ratio = Widget::from(Stat::new("E", &mac.e_cpu_ratio).percent());
+    let e_ratio = Widget::from(Stat::new("E-core load", &mac.e_cpu_ratio).percent());
     let e_frequency = Widget::from(Stat::new("E MHz", &mac.e_cpu_frequency).megahertz());
     let cpu_power = Widget::from(Stat::new("CPU W", &mac.cpu_power).watts());
     let gpu_power = Widget::from(Stat::new("GPU W", &mac.gpu_power).watts());
-    let ram_used = Widget::from(Stat::new("RAM", &mac.ram_used).bytes());
+    let ram_used = Widget::from(Stat::new("RAM used", &mac.ram_used).bytes());
     let ram_total = Widget::from(Stat::new("RAM total", &mac.ram_total).bytes());
     let ram_ratio = Widget::from(
-        Gauge::new("RAM used", &mac.ram_ratio)
+        Gauge::new("RAM utilization", &mac.ram_ratio)
             .percent()
             .accent("purple"),
     );
-    let swap_used = Widget::from(Stat::new("swap", &mac.swap_used).bytes());
-    let swap_total = Widget::from(Stat::new("swap total", &mac.swap_total).bytes());
+    let swap_used = Widget::from(Stat::new("Swap used", &mac.swap_used).bytes());
+    let swap_total = Widget::from(Stat::new("Swap total", &mac.swap_total).bytes());
     let swap_ratio = Widget::from(
-        Gauge::new("swap used", &mac.swap_ratio)
+        Gauge::new("Swap utilization", &mac.swap_ratio)
             .percent()
             .accent("blue"),
     );
-    let disk_free = Widget::from(Stat::new("free", &system.root_disk_available).bytes());
+    let disk_free = Widget::from(Stat::new("SSD free", &system.root_disk_available).bytes());
     let disk_used = Widget::from(
-        Gauge::new("used", &system.root_disk_ratio)
+        Gauge::new("SSD utilization", &system.root_disk_ratio)
             .percent()
             .accent("orange"),
     );
-    let disk_read = Widget::from(Stat::new("read", &disk_io.read).bytes_per_second());
-    let disk_write = Widget::from(Stat::new("write", &disk_io.write).bytes_per_second());
-    let network_down = Widget::from(Stat::new("down", &system.network_down).bytes_per_second());
-    let network_up = Widget::from(Stat::new("up", &system.network_up).bytes_per_second());
+    let disk_read = Widget::from(Stat::new("SSD read", &disk_io.read).bytes_per_second());
+    let disk_write = Widget::from(Stat::new("SSD write", &disk_io.write).bytes_per_second());
+    let network_down = Widget::from(Stat::new("Download", &system.network_down).bytes_per_second());
+    let network_up = Widget::from(Stat::new("Upload", &system.network_up).bytes_per_second());
     let processes = Widget::from(TableWidget::new("processes", &system.top_processes));
     let backup = Widget::from(CompactStatusWidget::new("backup", &backup));
-    let activity = Widget::from(
+    let processor_activity = Widget::from(
         Plot::new(
-            "activity",
+            "CPU / GPU LOAD (0-100%)",
             vec![
                 PlotSeries::new(&mac.cpu_total, "cyan"),
                 PlotSeries::new(&mac.gpu_ratio, "blue"),
+            ],
+        )
+        .history(90),
+    );
+    let disk_activity = Widget::from(
+        Plot::new(
+            "SSD I/O RATE",
+            vec![
                 PlotSeries::new(&disk_io.read, "amber"),
                 PlotSeries::new(&disk_io.write, "purple"),
             ],
@@ -130,18 +138,18 @@ fn configure() -> Result<App, Box<dyn Error>> {
     if desktop_enabled {
         surfaces.push(
             Surface::desktop(LayoutNode::stack(
-                10.0,
+                16.0,
                 vec![
                     LayoutNode::section(
                         "PERF",
-                        Insets::symmetric(6.0, 8.0),
+                        Insets::all(16.0),
                         LayoutNode::stack(
-                            8.0,
+                            12.0,
                             vec![
                                 LayoutNode::flow(
-                                    6.0,
-                                    6.0,
-                                    100.0,
+                                    16.0,
+                                    12.0,
+                                    120.0,
                                     vec![
                                         LayoutNode::widget(cpu.clone()),
                                         LayoutNode::widget(gpu.clone()),
@@ -156,50 +164,68 @@ fn configure() -> Result<App, Box<dyn Error>> {
                                         LayoutNode::widget(gpu_power.clone()),
                                     ],
                                 ),
-                                LayoutNode::widget(activity.clone()),
+                                LayoutNode::widget(processor_activity.clone()),
                             ],
                         ),
                     ),
                     LayoutNode::section(
                         "MEM",
-                        Insets::symmetric(6.0, 8.0),
-                        LayoutNode::flow(
-                            6.0,
-                            6.0,
-                            104.0,
+                        Insets::all(16.0),
+                        LayoutNode::stack(
+                            12.0,
                             vec![
-                                LayoutNode::widget(ram_used.clone()),
-                                LayoutNode::widget(ram_total.clone()),
-                                LayoutNode::widget(ram_ratio.clone()),
-                                LayoutNode::widget(swap_used.clone()),
-                                LayoutNode::widget(swap_total.clone()),
-                                LayoutNode::widget(swap_ratio.clone()),
+                                LayoutNode::flow(
+                                    16.0,
+                                    12.0,
+                                    120.0,
+                                    vec![
+                                        LayoutNode::widget(ram_used.clone()),
+                                        LayoutNode::widget(ram_total.clone()),
+                                        LayoutNode::widget(swap_used.clone()),
+                                        LayoutNode::widget(swap_total.clone()),
+                                    ],
+                                ),
+                                LayoutNode::flow(
+                                    16.0,
+                                    12.0,
+                                    240.0,
+                                    vec![
+                                        LayoutNode::widget(ram_ratio.clone()),
+                                        LayoutNode::widget(swap_ratio.clone()),
+                                    ],
+                                ),
                             ],
                         ),
                     ),
                     LayoutNode::section(
                         "DISK",
-                        Insets::symmetric(6.0, 8.0),
-                        LayoutNode::flow(
-                            6.0,
-                            6.0,
-                            100.0,
+                        Insets::all(16.0),
+                        LayoutNode::stack(
+                            12.0,
                             vec![
-                                LayoutNode::widget(disk_free.clone()),
+                                LayoutNode::flow(
+                                    16.0,
+                                    12.0,
+                                    130.0,
+                                    vec![
+                                        LayoutNode::widget(disk_free.clone()),
+                                        LayoutNode::widget(disk_read.clone()),
+                                        LayoutNode::widget(disk_write.clone()),
+                                        LayoutNode::widget(backup.clone()),
+                                    ],
+                                ),
                                 LayoutNode::widget(disk_used.clone()),
-                                LayoutNode::widget(disk_read.clone()),
-                                LayoutNode::widget(disk_write.clone()),
-                                LayoutNode::widget(backup.clone()),
+                                LayoutNode::widget(disk_activity.clone()),
                             ],
                         ),
                     ),
                     LayoutNode::section(
                         "NET",
-                        Insets::symmetric(6.0, 8.0),
+                        Insets::all(16.0),
                         LayoutNode::flow(
-                            6.0,
-                            6.0,
-                            160.0,
+                            16.0,
+                            12.0,
+                            240.0,
                             vec![
                                 LayoutNode::widget(network_down.clone()),
                                 LayoutNode::widget(network_up.clone()),
@@ -208,13 +234,14 @@ fn configure() -> Result<App, Box<dyn Error>> {
                     ),
                     LayoutNode::section(
                         "PROC",
-                        Insets::symmetric(6.0, 8.0),
+                        Insets::all(16.0),
                         LayoutNode::widget(processes.clone()),
                     ),
                 ],
             ))
             .position(32.0, 32.0, SurfaceOrigin::BottomLeft)
-            .width(480.0)
+            .width(640.0)
+            .content_inset(16.0)
             .background_opacity(desktop_background_opacity)
             .click_through(true),
         );
@@ -243,24 +270,29 @@ fn configure() -> Result<App, Box<dyn Error>> {
                                     LayoutNode::widget(gpu_power.clone()),
                                 ],
                             ),
-                            LayoutNode::widget(activity.clone()),
+                            LayoutNode::widget(processor_activity.clone()),
                         ],
                     ),
                 ),
                 LayoutNode::section(
                     "disk + net",
                     Insets::all(6.0),
-                    LayoutNode::flow(
-                        5.0,
-                        5.0,
-                        108.0,
+                    LayoutNode::stack(
+                        8.0,
                         vec![
-                            LayoutNode::widget(disk_free.clone()),
+                            LayoutNode::flow(
+                                8.0,
+                                8.0,
+                                108.0,
+                                vec![
+                                    LayoutNode::widget(disk_free.clone()),
+                                    LayoutNode::widget(disk_read.clone()),
+                                    LayoutNode::widget(disk_write.clone()),
+                                    LayoutNode::widget(network_down.clone()),
+                                    LayoutNode::widget(network_up.clone()),
+                                ],
+                            ),
                             LayoutNode::widget(disk_used.clone()),
-                            LayoutNode::widget(disk_read.clone()),
-                            LayoutNode::widget(disk_write.clone()),
-                            LayoutNode::widget(network_down.clone()),
-                            LayoutNode::widget(network_up.clone()),
                             LayoutNode::widget(backup.clone()),
                         ],
                     ),

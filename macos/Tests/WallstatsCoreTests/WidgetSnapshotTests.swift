@@ -243,6 +243,7 @@ struct WidgetSnapshotTests {
                     y: 0,
                     origin: .bottomLeft,
                     width: 300,
+                    contentInset: 16,
                     backgroundOpacity: 0,
                     clickThrough: true
                 ),

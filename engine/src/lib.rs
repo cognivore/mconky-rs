@@ -8,8 +8,8 @@
 #![warn(missing_docs)]
 
 mod app;
-mod command;
 mod collector;
+mod command;
 mod disk_io;
 mod error;
 mod id;
@@ -30,13 +30,13 @@ pub use error::{ConfigError, Error, Result};
 pub use id::{MetricId, MetricIdError};
 pub use layout::{Insets, LayoutNode, LayoutTrack, Surface, SurfaceKind, SurfaceOrigin};
 pub use macmon::{MacmonCollector, MacmonMetrics};
+#[doc(hidden)]
+pub use metric::WireValue;
 pub use metric::{
     Boolean, Bytes, BytesPerSecond, CompactStatus, CompactStatusValue, CompactStatusValueError,
     Count, DurationSeconds, Metric, Number, Ratio, StatusLight, Table, TableValue, TableValueError,
     Text, WireType,
 };
-#[doc(hidden)]
-pub use metric::WireValue;
 pub use system::{SystemCollector, SystemMetrics};
 pub use text_file::{MAX_TEXT_FILE_TAIL_BYTES, TextFile, TextFileSet};
 pub use widget::{
@@ -48,7 +48,7 @@ pub use widget::{
 pub const PROTOCOL_MAJOR: u32 = 1;
 
 /// The protocol minor version emitted by this crate.
-pub const PROTOCOL_MINOR: u32 = 1;
+pub const PROTOCOL_MINOR: u32 = 2;
 
 /// The SDK version reported in the protocol `hello` record.
 pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");

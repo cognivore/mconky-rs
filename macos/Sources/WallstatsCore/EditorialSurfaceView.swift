@@ -176,14 +176,20 @@ private struct SurfaceWidgetLeaf: View {
         case .sparkline:
             VStack(spacing: 4) {
                 valueRow
-                SurfacePlot(series: [series(metric: widget.metric, accent: widget.accent)])
+                SurfacePlot(series: [series(
+                    metric: widget.metric,
+                    accent: widget.accent,
+                    format: widget.format
+                )])
             }
         case .plot:
-            let plotSeries = widget.series.map { series(metric: $0.metric, accent: $0.accent) }
+            let plotSeries = widget.series.map {
+                series(metric: $0.metric, accent: $0.accent, format: $0.format)
+            }
             VStack(alignment: .leading, spacing: 4) {
                 if !widget.label.isEmpty {
                     Text(widget.label)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
                         .tracking(0.35)
                         .foregroundStyle(SurfacePalette.secondary)
                         .lineLimit(1)
@@ -213,6 +219,8 @@ private struct SurfaceWidgetLeaf: View {
             Spacer(minLength: 3)
             Text(formattedValue)
                 .foregroundStyle(SurfacePalette.primary)
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(2)
         }
         .font(.system(size: 11, weight: .medium, design: .monospaced))
         .lineLimit(1)
@@ -232,21 +240,25 @@ private struct SurfaceWidgetLeaf: View {
         return value
     }
 
-    private func series(metric: String, accent: String?) -> SurfacePlotSeries {
+    private func series(metric: String, accent: String?, format: MetricFormat) -> SurfacePlotSeries {
         guard let state = states[metric], state.error == nil else {
             return SurfacePlotSeries(
                 label: SurfaceMetricLabel.compact(metric),
+                currentValue: "--",
                 samples: [],
                 valueType: .number,
+                format: format,
                 color: SurfacePalette.accent(accent)
             )
         }
         return SurfacePlotSeries(
             label: SurfaceMetricLabel.compact(metric),
+            currentValue: WidgetValueFormatter.string(for: state.value, format: format),
             samples: state.history.isEmpty
                 ? state.value?.numericValue.map { [$0] } ?? []
                 : state.history,
             valueType: state.valueType,
+            format: format,
             color: SurfacePalette.accent(accent)
         )
     }
@@ -273,8 +285,10 @@ private struct SurfaceGauge: View {
 
 private struct SurfacePlotSeries {
     let label: String
+    let currentValue: String
     let samples: [Double]
     let valueType: MetricValueType
+    let format: MetricFormat
     let color: Color
 }
 
@@ -289,7 +303,7 @@ private struct SurfacePlotLegend: View {
                         Capsule()
                             .fill(series[index].color)
                             .frame(width: 7, height: 2)
-                        Text(series[index].label)
+                        Text("\(series[index].label) \(series[index].currentValue)")
                     }
                     .fixedSize(horizontal: true, vertical: false)
                 }
@@ -320,7 +334,14 @@ private struct SurfacePlot: View {
 
     var body: some View {
         Canvas { context, size in
-            let rect = CGRect(x: 3, y: 3, width: max(size.width - 6, 0), height: max(size.height - 6, 0))
+            let scale = SurfacePlotScale(series: series)
+            let scaleWidth = 48.0
+            let rect = CGRect(
+                x: 3,
+                y: 3,
+                width: max(size.width - scaleWidth - 6, 0),
+                height: max(size.height - 6, 0)
+            )
             guard rect.width > 0, rect.height > 0 else { return }
             for fraction in [0.25, 0.5, 0.75] as [CGFloat] {
                 var grid = Path()
@@ -330,8 +351,9 @@ private struct SurfacePlot: View {
                 context.stroke(grid, with: .color(SurfacePalette.grid), lineWidth: 0.5)
             }
             for (index, item) in series.enumerated() where !item.samples.isEmpty {
-                draw(item, index: index, rect: rect, context: &context)
+                draw(item, index: index, rect: rect, scale: scale, context: &context)
             }
+            drawScale(scale, size: size, context: &context)
         }
     }
 
@@ -339,16 +361,16 @@ private struct SurfacePlot: View {
         _ item: SurfacePlotSeries,
         index: Int,
         rect: CGRect,
+        scale: SurfacePlotScale,
         context: inout GraphicsContext
     ) {
-        let normalizer = SurfaceNormalizer(samples: item.samples, type: item.valueType)
         func point(_ sample: Int) -> CGPoint {
             let x = item.samples.count == 1
                 ? rect.maxX
                 : rect.minX + CGFloat(sample) / CGFloat(item.samples.count - 1) * rect.width
             return CGPoint(
                 x: x,
-                y: rect.maxY - CGFloat(normalizer.normalize(item.samples[sample])) * rect.height
+                y: rect.maxY - CGFloat(scale.normalize(item.samples[sample])) * rect.height
             )
         }
         var path = Path()
@@ -368,21 +390,65 @@ private struct SurfacePlot: View {
             with: .color(item.color)
         )
     }
+
+    private func drawScale(
+        _ scale: SurfacePlotScale,
+        size: CGSize,
+        context: inout GraphicsContext
+    ) {
+        let style = Text(scale.upperLabel)
+            .font(.system(size: 8, weight: .semibold, design: .monospaced))
+            .foregroundStyle(SurfacePalette.secondary)
+        context.draw(context.resolve(style), at: CGPoint(x: size.width - 2, y: 2), anchor: .topTrailing)
+        let lowerStyle = Text(scale.lowerLabel)
+            .font(.system(size: 8, weight: .semibold, design: .monospaced))
+            .foregroundStyle(SurfacePalette.secondary)
+        context.draw(
+            context.resolve(lowerStyle),
+            at: CGPoint(x: size.width - 2, y: size.height - 2),
+            anchor: .bottomTrailing
+        )
+    }
 }
 
-private struct SurfaceNormalizer {
-    let samples: [Double]
-    let type: MetricValueType
+private struct SurfacePlotScale {
+    let lower: Double
+    let upper: Double
+    let valueType: MetricValueType
+    let format: MetricFormat
+
+    init(series: [SurfacePlotSeries]) {
+        let samples = series.flatMap(\.samples)
+        valueType = series.first?.valueType ?? .number
+        format = series.first?.format ?? .number
+        if !series.isEmpty, series.allSatisfy({ $0.valueType == .ratio }) {
+            lower = 0
+            upper = 1
+        } else {
+            lower = min(samples.min() ?? 0, 0)
+            upper = max(samples.max() ?? 1, lower + 1)
+        }
+    }
 
     func normalize(_ value: Double) -> Double {
-        if type == .ratio { return min(max(value, 0), 1) }
-        let lower = samples.min() ?? 0
-        let upper = samples.max() ?? 1
-        if lower >= 0 {
-            let denominator = log1p(max(upper, 1))
-            return denominator > 0 ? min(max(log1p(max(value, 0)) / denominator, 0), 1) : 0.5
-        }
         return upper > lower ? min(max((value - lower) / (upper - lower), 0), 1) : 0.5
+    }
+
+    var upperLabel: String { formatted(upper) }
+    var lowerLabel: String { formatted(lower) }
+
+    private func formatted(_ value: Double) -> String {
+        let metricValue: TypedMetricValue
+        switch valueType {
+        case .ratio: metricValue = .ratio(value)
+        case .bytes: metricValue = .bytes(UInt64(max(value, 0)))
+        case .bytesPerSecond: metricValue = .bytesPerSecond(value)
+        case .count: metricValue = .count(UInt64(max(value, 0)))
+        case .durationSeconds: metricValue = .durationSeconds(value)
+        case .number: metricValue = .number(value)
+        case .text, .boolean, .table, .compactStatus: metricValue = .number(value)
+        }
+        return WidgetValueFormatter.string(for: metricValue, format: format)
     }
 }
 
@@ -394,28 +460,27 @@ private struct SurfaceCompactStatus: View {
     let date: Date
 
     var body: some View {
-        VStack(spacing: 5) {
-            if !label.isEmpty {
-                Text(label)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .tracking(0.35)
-                    .foregroundStyle(SurfacePalette.secondary)
-                    .lineLimit(1)
-            }
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .tracking(0.35)
+                .foregroundStyle(SurfacePalette.secondary)
+                .lineLimit(1)
+                .layoutPriority(1)
+            Spacer(minLength: 4)
             HStack(spacing: CGFloat(layout.spacing)) {
                 Text(value?.leading ?? "☁️")
                 Text(value?.trailing ?? "💾")
             }
-            .font(.system(size: CGFloat(layout.fontSize)))
-            HStack(spacing: 7) {
-                SurfaceStatusMark(light: value?.light ?? .gray)
-                Text(CompactAgeFormatter.compact(
-                    ageSeconds: value?.ageSeconds,
-                    elapsedSeconds: date.timeIntervalSince(sampledAt)
-                ))
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundStyle(SurfacePalette.primary)
-            }
+            .font(.system(size: min(CGFloat(layout.fontSize), 15)))
+            SurfaceStatusMark(light: value?.light ?? .gray)
+            Text(CompactAgeFormatter.compact(
+                ageSeconds: value?.ageSeconds,
+                elapsedSeconds: date.timeIntervalSince(sampledAt)
+            ))
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .foregroundStyle(SurfacePalette.primary)
+            .fixedSize(horizontal: true, vertical: false)
         }
         .accessibilityLabel(metricID)
     }

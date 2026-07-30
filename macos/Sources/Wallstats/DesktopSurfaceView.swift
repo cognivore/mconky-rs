@@ -14,6 +14,7 @@ struct DesktopSurfaceView: View {
                 sampledAt: sampledAt(metrics: metrics, fallback: Date()),
                 date: Date()
             )
+            .padding(CGFloat(surface.contentInset ?? 0))
         }
     }
 

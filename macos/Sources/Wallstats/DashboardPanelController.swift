@@ -71,7 +71,8 @@ final class DashboardPanelController: NSObject {
                let configuredWidth = surface.width,
                let configuredX = surface.x,
                let configuredY = surface.y,
-               let origin = surface.origin
+               let origin = surface.origin,
+               let configuredContentInset = surface.contentInset
         else {
             hide()
             return
@@ -80,8 +81,13 @@ final class DashboardPanelController: NSObject {
         let visible = screen.visibleFrame
         let screenFrame = screen.frame
         let width = min(max(CGFloat(configuredWidth), 1), visible.width)
-        let layout = EditorialLayoutSolver.solve(root: surface.root, width: width)
-        let height = min(max(CGFloat(layout.resolvedHeight), 1), visible.height)
+        let contentInset = CGFloat(configuredContentInset)
+        let contentWidth = max(width - contentInset * 2, 0)
+        let layout = EditorialLayoutSolver.solve(root: surface.root, width: contentWidth)
+        let height = min(
+            max(CGFloat(layout.resolvedHeight) + contentInset * 2, 1),
+            visible.height
+        )
         let frame = DesktopSurfacePlacement.frame(
             width: width,
             height: height,

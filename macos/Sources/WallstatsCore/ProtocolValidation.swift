@@ -443,6 +443,8 @@ public enum ProtocolValidator {
                   let y = surface.y, y.isFinite,
                   surface.origin != nil,
                   let width = surface.width, width.isFinite, width > 0,
+                  let contentInset = surface.contentInset,
+                  contentInset.isFinite, contentInset >= 0,
                   let opacity = surface.backgroundOpacity,
                   opacity.isFinite, (0 ... 1).contains(opacity),
                   surface.clickThrough != nil
@@ -456,6 +458,7 @@ public enum ProtocolValidator {
                   surface.y == nil,
                   surface.origin == nil,
                   surface.width == nil,
+                  surface.contentInset == nil,
                   surface.backgroundOpacity == nil,
                   surface.clickThrough == nil
             else {

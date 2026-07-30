@@ -72,8 +72,8 @@ struct EditorialLayoutSolverTests {
         assertFiniteAndNonoverlapping(result.placements)
     }
 
-    @Test("Section content contains its child and compact status content is square")
-    func sectionAndSquareContent() {
+    @Test("Section content contains its full-width compact status child")
+    func sectionAndCompactContent() {
         let root = LayoutNode.section(
             title: "status",
             insets: LayoutInsets(top: 5, right: 7, bottom: 9, left: 11),
@@ -90,7 +90,7 @@ struct EditorialLayoutSolverTests {
 
         #expect(section.role == .sectionChrome)
         #expect(section.contentFrame.contains(widget.allocationFrame))
-        #expect(widget.contentFrame.width == widget.contentFrame.height)
+        #expect(widget.contentFrame.width == widget.allocationFrame.width)
         #expect(widget.allocationFrame.contains(widget.contentFrame))
     }
 

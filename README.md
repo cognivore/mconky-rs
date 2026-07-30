@@ -55,8 +55,8 @@ inward offsets from `BottomLeft`, `TopLeft`, `BottomRight`, or `TopRight`; the
 selected corner determines both the placement of `(0, 0)` and the axis
 directions. Its configured `width` drives the width-first solve, and the natural
 AST height determines the panel height. The current example uses
-`.position(32.0, 32.0, SurfaceOrigin::BottomLeft).width(480.0)`, a subtle
-12%-opaque black background, and click-through input. WidgetKit receives
+`.position(32.0, 32.0, SurfaceOrigin::BottomLeft).width(640.0)` with
+`.content_inset(16.0)`, a subtle 12%-opaque black background, and click-through input. WidgetKit receives
 separate large, medium, and small roots built from the same node types.
 
 The renderer remains shape-first and omits versions, protocol details, and
@@ -189,7 +189,8 @@ if desktop_enabled {
     surfaces.push(
         Surface::desktop(LayoutNode::stack(10.0, vec![perf.clone()]))
             .position(32.0, 32.0, SurfaceOrigin::BottomLeft)
-            .width(480.0)
+            .width(640.0)
+            .content_inset(16.0)
             .background_opacity(0.12)
             .click_through(true),
     );
@@ -260,9 +261,21 @@ Closures implementing the same signature work without defining a struct.
 Built-in `LogCountCollector` reads only a bounded tail and reports missing,
 unreadable, non-regular, or invalid UTF-8 files as visible per-metric errors.
 
-The invisible companion fingerprints `config.rs`, debounces direct writes and
-atomic editor replacements, and recompiles automatically. Collector failures
-leave the widget's last valid snapshot intact.
+Configuration is ordinary Rust and may use local modules beside the entry point:
+
+```text
+~/.config/wallstats/
+  config.rs
+  components/
+    mod.rs
+    team_timezones.rs
+```
+
+Declare them from `config.rs` with standard `mod components;` syntax. The
+invisible companion fingerprints every Rust source below the configuration
+directory, debounces direct writes and atomic editor replacements, and forces
+Cargo dependency tracking on reload. Collector failures leave the widget's last
+valid snapshot intact.
 
 ## Development
 

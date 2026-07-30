@@ -47,6 +47,8 @@ pub struct Surface {
     #[serde(skip_serializing_if = "Option::is_none")]
     width: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    content_inset: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     background_opacity: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     click_through: Option<bool>,
@@ -61,7 +63,8 @@ impl Surface {
             x: Some(0.0),
             y: Some(0.0),
             origin: Some(SurfaceOrigin::BottomLeft),
-            width: Some(480.0),
+            width: Some(640.0),
+            content_inset: Some(16.0),
             background_opacity: Some(0.0),
             click_through: Some(true),
         }
@@ -90,6 +93,7 @@ impl Surface {
             y: None,
             origin: None,
             width: None,
+            content_inset: None,
             background_opacity: None,
             click_through: None,
         }
@@ -106,6 +110,12 @@ impl Surface {
     /// Sets desktop width in points.
     pub fn width(mut self, width: f64) -> Self {
         self.width = Some(width);
+        self
+    }
+
+    /// Sets uniform space between the desktop panel edge and its root layout.
+    pub fn content_inset(mut self, inset: f64) -> Self {
+        self.content_inset = Some(inset);
         self
     }
 
@@ -144,6 +154,14 @@ impl Surface {
                         "desktop width must be finite and greater than zero".to_owned(),
                     ));
                 }
+                let content_inset = self.content_inset.ok_or_else(|| {
+                    ConfigError::InvalidLayout("desktop content inset is missing".to_owned())
+                })?;
+                if !content_inset.is_finite() || content_inset < 0.0 {
+                    return Err(ConfigError::InvalidLayout(
+                        "desktop content inset must be finite and nonnegative".to_owned(),
+                    ));
+                }
                 let opacity = self.background_opacity.ok_or_else(|| {
                     ConfigError::InvalidLayout("desktop background opacity is missing".to_owned())
                 })?;
@@ -163,6 +181,7 @@ impl Surface {
                     || self.y.is_some()
                     || self.origin.is_some()
                     || self.width.is_some()
+                    || self.content_inset.is_some()
                     || self.background_opacity.is_some()
                     || self.click_through.is_some()
                 {
@@ -181,9 +200,7 @@ impl Surface {
 fn validate_finite(value: Option<f64>, name: &str) -> Result<(), ConfigError> {
     match value {
         Some(value) if value.is_finite() => Ok(()),
-        Some(_) => Err(ConfigError::InvalidLayout(format!(
-            "{name} must be finite"
-        ))),
+        Some(_) => Err(ConfigError::InvalidLayout(format!("{name} must be finite"))),
         None => Err(ConfigError::InvalidLayout(format!("{name} is missing"))),
     }
 }
@@ -500,7 +517,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(surfaces).unwrap(),
             json!([
-                {"kind":"desktop","root":{"kind":"stack","gap":4.0,"children":[{"kind":"widget","widget":{"kind":"value","label":"CPU","metric":"cpu","format":"percent"}}]},"x":32.0,"y":32.0,"origin":"bottom_left","width":400.0,"background_opacity":0.0,"click_through":true},
+                {"kind":"desktop","root":{"kind":"stack","gap":4.0,"children":[{"kind":"widget","widget":{"kind":"value","label":"CPU","metric":"cpu","format":"percent"}}]},"x":32.0,"y":32.0,"origin":"bottom_left","width":400.0,"content_inset":16.0,"background_opacity":0.0,"click_through":true},
                 {"kind":"widget_large","root":{"kind":"section","title":"Perf","insets":{"top":8.0,"right":8.0,"bottom":8.0,"left":8.0},"child":{"kind":"widget","widget":{"kind":"value","label":"CPU","metric":"cpu","format":"percent"}}}},
                 {"kind":"widget_medium","root":{"kind":"split","gap":6.0,"minimum_track_width":120.0,"tracks":[{"weight":2.0,"child":{"kind":"widget","widget":{"kind":"value","label":"CPU","metric":"cpu","format":"percent"}}},{"weight":1.0,"child":{"kind":"widget","widget":{"kind":"compact_status","label":"Backup","metric":"backup","format":"compact_status"}}}]}},
                 {"kind":"widget_small","root":{"kind":"flow","horizontal_gap":3.0,"vertical_gap":4.0,"minimum_item_width":80.0,"children":[{"kind":"widget","widget":{"kind":"compact_status","label":"Backup","metric":"backup","format":"compact_status"}}]}}

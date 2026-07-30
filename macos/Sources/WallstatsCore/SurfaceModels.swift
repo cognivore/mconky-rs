@@ -144,6 +144,7 @@ public struct SurfacePlan: Codable, Equatable, Sendable {
     public let y: Double?
     public let origin: SurfaceOrigin?
     public let width: Double?
+    public let contentInset: Double?
     public let backgroundOpacity: Double?
     public let clickThrough: Bool?
 
@@ -154,6 +155,7 @@ public struct SurfacePlan: Codable, Equatable, Sendable {
         y: Double? = nil,
         origin: SurfaceOrigin? = nil,
         width: Double? = nil,
+        contentInset: Double? = nil,
         backgroundOpacity: Double? = nil,
         clickThrough: Bool? = nil
     ) {
@@ -163,6 +165,7 @@ public struct SurfacePlan: Codable, Equatable, Sendable {
         self.y = y
         self.origin = origin
         self.width = width
+        self.contentInset = contentInset
         self.backgroundOpacity = backgroundOpacity
         self.clickThrough = clickThrough
     }
@@ -174,6 +177,7 @@ public struct SurfacePlan: Codable, Equatable, Sendable {
         case y
         case origin
         case width
+        case contentInset = "content_inset"
         case backgroundOpacity = "background_opacity"
         case clickThrough = "click_through"
     }
@@ -187,6 +191,8 @@ public struct SurfacePlan: Codable, Equatable, Sendable {
         origin = try container.decodeIfPresent(SurfaceOrigin.self, forKey: .origin)
             ?? (kind == .desktop ? .topLeft : nil)
         width = try container.decodeIfPresent(Double.self, forKey: .width)
+        contentInset = try container.decodeIfPresent(Double.self, forKey: .contentInset)
+            ?? (kind == .desktop ? 0 : nil)
         backgroundOpacity = try container.decodeIfPresent(Double.self, forKey: .backgroundOpacity)
         clickThrough = try container.decodeIfPresent(Bool.self, forKey: .clickThrough)
     }
@@ -199,6 +205,7 @@ public struct SurfacePlan: Codable, Equatable, Sendable {
         try container.encodeIfPresent(y, forKey: .y)
         try container.encodeIfPresent(origin, forKey: .origin)
         try container.encodeIfPresent(width, forKey: .width)
+        try container.encodeIfPresent(contentInset, forKey: .contentInset)
         try container.encodeIfPresent(backgroundOpacity, forKey: .backgroundOpacity)
         try container.encodeIfPresent(clickThrough, forKey: .clickThrough)
     }

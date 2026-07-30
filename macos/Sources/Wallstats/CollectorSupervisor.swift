@@ -153,7 +153,7 @@ final class CollectorSupervisor {
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
         process.executableURL = executableURL
-        process.arguments = [configURL.path, "--"]
+        process.arguments = ["--force", configURL.path, "--"]
         process.currentDirectoryURL = configURL.deletingLastPathComponent()
         process.environment = resolver.childEnvironment(resolvedRustScriptURL: executableURL)
         process.standardInput = FileHandle.nullDevice
@@ -173,7 +173,7 @@ final class CollectorSupervisor {
         model.beginLaunch(configURL: configURL)
         model.appendDiagnostic(
             level: .info,
-            message: "Launching \(executableURL.path) \(configURL.path) --"
+            message: "Launching \(executableURL.path) --force \(configURL.path) --"
         )
 
         do {

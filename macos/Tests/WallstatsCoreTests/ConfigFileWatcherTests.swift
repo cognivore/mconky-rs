@@ -5,7 +5,7 @@ import Testing
 
 @Suite("Configuration file watcher")
 struct ConfigFileWatcherTests {
-    @Test("Initial state and unrelated directory changes do not reload")
+    @Test("Unrelated files and Cargo build output do not reload")
     func unchangedDoesNotReload() async throws {
         let fixture = try ConfigWatcherFixture()
         defer { fixture.remove() }
@@ -16,11 +16,54 @@ struct ConfigFileWatcherTests {
 
         watcher.watch(fixture.configURL)
         try Data("unrelated".utf8).write(
-            to: fixture.rootURL.appendingPathComponent("other.rs")
+            to: fixture.rootURL.appendingPathComponent("notes.txt")
+        )
+        let targetURL = fixture.rootURL.appendingPathComponent("target", isDirectory: true)
+        try FileManager.default.createDirectory(at: targetURL, withIntermediateDirectories: true)
+        try Data("const GENERATED: u8 = 1;".utf8).write(
+            to: targetURL.appendingPathComponent("generated.rs")
         )
         try await Task.sleep(for: .milliseconds(250))
 
         #expect(recorder.count == 0)
+    }
+
+    @Test("Sibling Rust module edits trigger one debounced reload")
+    func siblingModuleEdit() async throws {
+        let fixture = try ConfigWatcherFixture()
+        defer { fixture.remove() }
+        try Data("mod component;".utf8).write(to: fixture.configURL)
+        let componentURL = fixture.rootURL.appendingPathComponent("component.rs")
+        try Data("const VALUE: u8 = 1;".utf8).write(to: componentURL)
+        let recorder = ConfigChangeRecorder()
+        let watcher = makeWatcher(recorder: recorder)
+        defer { watcher.stop() }
+
+        watcher.watch(fixture.configURL)
+        try Data("const VALUE: u8 = 2;".utf8).write(to: componentURL)
+        try await waitForCount(1, recorder: recorder)
+
+        #expect(recorder.urls == [fixture.configURL.standardizedFileURL])
+    }
+
+    @Test("Nested Rust module creation triggers one debounced reload")
+    func nestedModuleCreation() async throws {
+        let fixture = try ConfigWatcherFixture()
+        defer { fixture.remove() }
+        try Data("mod components;".utf8).write(to: fixture.configURL)
+        let componentsURL = fixture.rootURL.appendingPathComponent("components", isDirectory: true)
+        try FileManager.default.createDirectory(at: componentsURL, withIntermediateDirectories: true)
+        let recorder = ConfigChangeRecorder()
+        let watcher = makeWatcher(recorder: recorder)
+        defer { watcher.stop() }
+
+        watcher.watch(fixture.configURL)
+        try Data("pub const VALUE: u8 = 1;".utf8).write(
+            to: componentsURL.appendingPathComponent("clock.rs")
+        )
+        try await waitForCount(1, recorder: recorder)
+
+        #expect(recorder.urls == [fixture.configURL.standardizedFileURL])
     }
 
     @Test("Direct file edits trigger one debounced reload")

@@ -180,7 +180,7 @@ public enum EditorialLayoutSolver {
         case .table:
             FlexBounds(minimum: 64, preferred: 112, maximum: 250, grow: 2, shrink: 1)
         case .compactStatus:
-            FlexBounds(minimum: 54, preferred: 62, maximum: 68, grow: 0, shrink: 0)
+            FlexBounds(minimum: 20, preferred: 26, maximum: 36, grow: 0.5, shrink: 1)
         }
     }
 
@@ -214,22 +214,12 @@ public enum EditorialLayoutSolver {
             let bounds = widgetBounds(widget.kind)
             let contentHeight = min(frame.height, bounds.maximum)
             let contentFrame: EditorialRect
-            if widget.kind == .compactStatus {
-                let side = min(frame.width, contentHeight)
-                contentFrame = EditorialRect(
-                    x: frame.x + (frame.width - side) / 2,
-                    y: frame.y + (frame.height - side) / 2,
-                    width: side,
-                    height: side
-                )
-            } else {
-                contentFrame = EditorialRect(
-                    x: frame.x,
-                    y: frame.y + (frame.height - contentHeight) / 2,
-                    width: frame.width,
-                    height: contentHeight
-                )
-            }
+            contentFrame = EditorialRect(
+                x: frame.x,
+                y: frame.y + (frame.height - contentHeight) / 2,
+                width: frame.width,
+                height: contentHeight
+            )
             placements.append(EditorialPlacement(
                 pathID: path,
                 role: .widget(widget.kind),
