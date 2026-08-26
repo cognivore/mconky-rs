@@ -6,8 +6,8 @@
 
 // The invisible companion recompiles this file automatically after each save.
 
-use std::error::Error;
 use std::env;
+use std::error::Error;
 use std::io;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -21,9 +21,9 @@ use wallstats::{
 };
 
 fn configure() -> Result<App, Box<dyn Error>> {
-    let home = env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, "HOME is not set")
-    })?;
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))?;
     let desktop_enabled = true;
     let wyrm_watch_enabled = true;
     let widget_large_enabled = true;
@@ -81,77 +81,153 @@ fn configure() -> Result<App, Box<dyn Error>> {
     )?;
 
     // ── wyrm · the vacationvm deploy box (sweater.vac.fere.me) ───────────
-    // One SSH probe per cycle gathers everything; every wyrm metric reads the
-    // shared snapshot, so the server sees a single short connection every
-    // five minutes. Numbers go dark ("--") whenever the latest probe failed —
-    // only the status light and the risk line keep reporting, in red.
-    let wyrm_probe = Arc::new(WyrmProbe::new());
-    let wyrm_schedule = Schedule::every(WYRM_CADENCE);
-    let probe = Arc::clone(&wyrm_probe);
-    let wyrm_status = app.metric::<CompactStatus>("wyrm.status", wyrm_schedule, move || {
-        let reading = probe.reading();
-        let Some((age, snapshot)) = reading.snapshot else {
-            let message = reading
-                .error
-                .unwrap_or_else(|| "no sample yet".to_owned());
-            return Err(CollectError::new(format!("wyrm unreachable: {message}")));
-        };
-        let light = if reading.error.is_some() {
-            StatusLight::Red
-        } else {
-            snapshot.risk().0
-        };
-        Ok(CompactStatusValue::new("🐉", "☁️", light)
-            .age(age)
-            .glyph_scale(0.7))
-    })?;
-    let probe = Arc::clone(&wyrm_probe);
-    let wyrm_risk = app.metric::<Text>("wyrm.risk", wyrm_schedule, move || {
-        let reading = probe.reading();
-        if reading.error.is_some() {
-            return Ok("unreachable".to_owned());
-        }
-        match reading.snapshot {
-            Some((_, snapshot)) => Ok(snapshot.risk().1),
-            None => Ok("no contact yet".to_owned()),
-        }
-    })?;
-    let probe = Arc::clone(&wyrm_probe);
-    let wyrm_load1 = app.metric::<Number>("wyrm.load1", wyrm_schedule, move || {
-        Ok(probe.snapshot()?.load1)
-    })?;
-    let probe = Arc::clone(&wyrm_probe);
-    let wyrm_load5 = app.metric::<Number>("wyrm.load5", wyrm_schedule, move || {
-        Ok(probe.snapshot()?.load5)
-    })?;
-    let probe = Arc::clone(&wyrm_probe);
-    let wyrm_failed = app.metric::<Count>("wyrm.units.failed", wyrm_schedule, move || {
-        Ok(probe.snapshot()?.failed_units.len() as u64)
-    })?;
-    let probe = Arc::clone(&wyrm_probe);
-    let wyrm_mem_ratio = app.metric::<Ratio>("wyrm.mem.ratio", wyrm_schedule, move || {
-        Ok(probe.snapshot()?.mem_used_ratio())
-    })?;
-    let probe = Arc::clone(&wyrm_probe);
-    let wyrm_mem_avail = app.metric::<Bytes>("wyrm.mem.avail", wyrm_schedule, move || {
-        Ok(probe.snapshot()?.mem_avail)
-    })?;
-    let probe = Arc::clone(&wyrm_probe);
-    let wyrm_swap_used = app.metric::<Bytes>("wyrm.swap.used", wyrm_schedule, move || {
-        Ok(probe.snapshot()?.swap_used())
-    })?;
-    let probe = Arc::clone(&wyrm_probe);
-    let wyrm_disk_ratio = app.metric::<Ratio>("wyrm.disk.ratio", wyrm_schedule, move || {
-        Ok(probe.snapshot()?.disk_used_ratio())
-    })?;
-    let probe = Arc::clone(&wyrm_probe);
-    let wyrm_disk_avail = app.metric::<Bytes>("wyrm.disk.avail", wyrm_schedule, move || {
-        Ok(probe.snapshot()?.disk_avail)
-    })?;
-    let probe = Arc::clone(&wyrm_probe);
-    let wyrm_uptime = app.metric::<DurationSeconds>("wyrm.uptime", wyrm_schedule, move || {
-        Ok(probe.snapshot()?.uptime_seconds)
-    })?;
+    // Registering these metrics is what starts the SSH probing, so the
+    // flag has to gate the whole watch and not merely its surface —
+    // otherwise turning the watch off would keep connecting to the server
+    // every cycle while dropping the panel that shows the answer.
+    let wyrm_surface = if wyrm_watch_enabled {
+        // One SSH probe per cycle gathers everything; every wyrm metric reads the
+        // shared snapshot, so the server sees a single short connection every
+        // five minutes. Numbers go dark ("--") whenever the latest probe failed —
+        // only the status light and the risk line keep reporting, in red.
+        let wyrm_probe = Arc::new(WyrmProbe::new());
+        let wyrm_schedule = Schedule::every(WYRM_CADENCE);
+        let probe = Arc::clone(&wyrm_probe);
+        let wyrm_status = app.metric::<CompactStatus>("wyrm.status", wyrm_schedule, move || {
+            let reading = probe.reading();
+            let Some((age, snapshot)) = reading.snapshot else {
+                let message = reading.error.unwrap_or_else(|| "no sample yet".to_owned());
+                return Err(CollectError::new(format!("wyrm unreachable: {message}")));
+            };
+            let light = if reading.error.is_some() {
+                StatusLight::Red
+            } else {
+                snapshot.risk().0
+            };
+            Ok(CompactStatusValue::new("🐉", "☁️", light)
+                .age(age)
+                .glyph_scale(0.7))
+        })?;
+        let probe = Arc::clone(&wyrm_probe);
+        let wyrm_risk = app.metric::<Text>("wyrm.risk", wyrm_schedule, move || {
+            let reading = probe.reading();
+            if reading.error.is_some() {
+                return Ok("unreachable".to_owned());
+            }
+            match reading.snapshot {
+                Some((_, snapshot)) => Ok(snapshot.risk().1),
+                None => Ok("no contact yet".to_owned()),
+            }
+        })?;
+        let probe = Arc::clone(&wyrm_probe);
+        let wyrm_load1 = app.metric::<Number>("wyrm.load1", wyrm_schedule, move || {
+            Ok(probe.snapshot()?.load1)
+        })?;
+        let probe = Arc::clone(&wyrm_probe);
+        let wyrm_load5 = app.metric::<Number>("wyrm.load5", wyrm_schedule, move || {
+            Ok(probe.snapshot()?.load5)
+        })?;
+        let probe = Arc::clone(&wyrm_probe);
+        let wyrm_failed = app.metric::<Count>("wyrm.units.failed", wyrm_schedule, move || {
+            Ok(probe.snapshot()?.failed_units.len() as u64)
+        })?;
+        let probe = Arc::clone(&wyrm_probe);
+        let wyrm_mem_ratio = app.metric::<Ratio>("wyrm.mem.ratio", wyrm_schedule, move || {
+            Ok(probe.snapshot()?.mem_used_ratio())
+        })?;
+        let probe = Arc::clone(&wyrm_probe);
+        let wyrm_mem_avail = app.metric::<Bytes>("wyrm.mem.avail", wyrm_schedule, move || {
+            Ok(probe.snapshot()?.mem_avail)
+        })?;
+        let probe = Arc::clone(&wyrm_probe);
+        let wyrm_swap_used = app.metric::<Bytes>("wyrm.swap.used", wyrm_schedule, move || {
+            Ok(probe.snapshot()?.swap_used())
+        })?;
+        let probe = Arc::clone(&wyrm_probe);
+        let wyrm_disk_ratio = app.metric::<Ratio>("wyrm.disk.ratio", wyrm_schedule, move || {
+            Ok(probe.snapshot()?.disk_used_ratio())
+        })?;
+        let probe = Arc::clone(&wyrm_probe);
+        let wyrm_disk_avail = app.metric::<Bytes>("wyrm.disk.avail", wyrm_schedule, move || {
+            Ok(probe.snapshot()?.disk_avail)
+        })?;
+        let probe = Arc::clone(&wyrm_probe);
+        let wyrm_uptime =
+            app.metric::<DurationSeconds>("wyrm.uptime", wyrm_schedule, move || {
+                Ok(probe.snapshot()?.uptime_seconds)
+            })?;
+
+        // Accents rhyme with the local surface: purple = RAM, orange = disk,
+        // cyan/blue = load series. Risk state lives only in the status light.
+        let wyrm_status_row =
+            Widget::from(CompactStatusWidget::new("wyrm · vac.fere.me", &wyrm_status));
+        let wyrm_risk_row = Widget::from(Stat::new("risk", &wyrm_risk));
+        let wyrm_load_stat = Widget::from(Stat::new("load 1m", &wyrm_load1));
+        let wyrm_failed_stat = Widget::from(Stat::new("failed units", &wyrm_failed));
+        let wyrm_mem_stat = Widget::from(Stat::new("RAM free", &wyrm_mem_avail).bytes());
+        let wyrm_disk_stat = Widget::from(Stat::new("disk free", &wyrm_disk_avail).bytes());
+        let wyrm_swap_stat = Widget::from(Stat::new("swap used", &wyrm_swap_used).bytes());
+        let wyrm_uptime_stat = Widget::from(Stat::new("uptime", &wyrm_uptime));
+        let wyrm_mem_gauge = Widget::from(
+            Gauge::new("RAM pressure", &wyrm_mem_ratio)
+                .percent()
+                .accent("purple"),
+        );
+        let wyrm_disk_gauge = Widget::from(
+            Gauge::new("disk pressure", &wyrm_disk_ratio)
+                .percent()
+                .accent("orange"),
+        );
+        // 96 samples ≈ 8h when full, but history restarts empty on each reload
+        // and the plot stretches what it has — the label must not promise a span.
+        let wyrm_load_plot = Widget::from(
+            Plot::new(
+                "LOAD · 5-MIN STEPS",
+                vec![
+                    PlotSeries::new(&wyrm_load1, "cyan"),
+                    PlotSeries::new(&wyrm_load5, "blue"),
+                ],
+            )
+            .history(96),
+        );
+
+        Some(
+            Surface::desktop(LayoutNode::section(
+                "WYRM",
+                Insets::all(14.0),
+                LayoutNode::stack(
+                    10.0,
+                    vec![
+                        LayoutNode::widget(wyrm_status_row),
+                        LayoutNode::widget(wyrm_risk_row),
+                        LayoutNode::flow(
+                            14.0,
+                            8.0,
+                            128.0,
+                            vec![
+                                LayoutNode::widget(wyrm_load_stat),
+                                LayoutNode::widget(wyrm_failed_stat),
+                                LayoutNode::widget(wyrm_mem_stat),
+                                LayoutNode::widget(wyrm_disk_stat),
+                                LayoutNode::widget(wyrm_swap_stat),
+                                LayoutNode::widget(wyrm_uptime_stat),
+                            ],
+                        ),
+                        LayoutNode::widget(wyrm_mem_gauge),
+                        LayoutNode::widget(wyrm_disk_gauge),
+                        LayoutNode::widget(wyrm_load_plot),
+                    ],
+                ),
+            ))
+            .position(32.0, 32.0, SurfaceOrigin::BottomRight)
+            .width(340.0)
+            .content_inset(14.0)
+            .background_opacity(desktop_background_opacity)
+            .click_through(true),
+        )
+    } else {
+        None
+    };
 
     let cpu = Widget::from(Stat::new("CPU load", &mac.cpu_total).percent());
     let gpu = Widget::from(Stat::new("GPU load", &mac.gpu_ratio).percent());
@@ -209,39 +285,6 @@ fn configure() -> Result<App, Box<dyn Error>> {
             ],
         )
         .history(90),
-    );
-
-    // Accents rhyme with the local surface: purple = RAM, orange = disk,
-    // cyan/blue = load series. Risk state lives only in the status light.
-    let wyrm_status_row = Widget::from(CompactStatusWidget::new("wyrm · vac.fere.me", &wyrm_status));
-    let wyrm_risk_row = Widget::from(Stat::new("risk", &wyrm_risk));
-    let wyrm_load_stat = Widget::from(Stat::new("load 1m", &wyrm_load1));
-    let wyrm_failed_stat = Widget::from(Stat::new("failed units", &wyrm_failed));
-    let wyrm_mem_stat = Widget::from(Stat::new("RAM free", &wyrm_mem_avail).bytes());
-    let wyrm_disk_stat = Widget::from(Stat::new("disk free", &wyrm_disk_avail).bytes());
-    let wyrm_swap_stat = Widget::from(Stat::new("swap used", &wyrm_swap_used).bytes());
-    let wyrm_uptime_stat = Widget::from(Stat::new("uptime", &wyrm_uptime));
-    let wyrm_mem_gauge = Widget::from(
-        Gauge::new("RAM pressure", &wyrm_mem_ratio)
-            .percent()
-            .accent("purple"),
-    );
-    let wyrm_disk_gauge = Widget::from(
-        Gauge::new("disk pressure", &wyrm_disk_ratio)
-            .percent()
-            .accent("orange"),
-    );
-    // 96 samples ≈ 8h when full, but history restarts empty on each reload
-    // and the plot stretches what it has — the label must not promise a span.
-    let wyrm_load_plot = Widget::from(
-        Plot::new(
-            "LOAD · 5-MIN STEPS",
-            vec![
-                PlotSeries::new(&wyrm_load1, "cyan"),
-                PlotSeries::new(&wyrm_load5, "blue"),
-            ],
-        )
-        .history(96),
     );
 
     let mut surfaces = Vec::new();
@@ -356,42 +399,7 @@ fn configure() -> Result<App, Box<dyn Error>> {
             .click_through(true),
         );
     }
-    if wyrm_watch_enabled {
-        surfaces.push(
-            Surface::desktop(LayoutNode::section(
-                "WYRM",
-                Insets::all(14.0),
-                LayoutNode::stack(
-                    10.0,
-                    vec![
-                        LayoutNode::widget(wyrm_status_row),
-                        LayoutNode::widget(wyrm_risk_row),
-                        LayoutNode::flow(
-                            14.0,
-                            8.0,
-                            128.0,
-                            vec![
-                                LayoutNode::widget(wyrm_load_stat),
-                                LayoutNode::widget(wyrm_failed_stat),
-                                LayoutNode::widget(wyrm_mem_stat),
-                                LayoutNode::widget(wyrm_disk_stat),
-                                LayoutNode::widget(wyrm_swap_stat),
-                                LayoutNode::widget(wyrm_uptime_stat),
-                            ],
-                        ),
-                        LayoutNode::widget(wyrm_mem_gauge),
-                        LayoutNode::widget(wyrm_disk_gauge),
-                        LayoutNode::widget(wyrm_load_plot),
-                    ],
-                ),
-            ))
-            .position(32.0, 32.0, SurfaceOrigin::BottomRight)
-            .width(340.0)
-            .content_inset(14.0)
-            .background_opacity(desktop_background_opacity)
-            .click_through(true),
-        );
-    }
+    surfaces.extend(wyrm_surface);
     if widget_large_enabled {
         surfaces.push(Surface::widget_large(LayoutNode::stack(
             8.0,
@@ -560,7 +568,11 @@ impl WyrmSnapshot {
     fn risk(&self) -> (StatusLight, String) {
         let cores = self.cores.max(1.0);
         if let [first, rest @ ..] = self.failed_units.as_slice() {
-            let name: String = first.trim_end_matches(".service").chars().take(22).collect();
+            let name: String = first
+                .trim_end_matches(".service")
+                .chars()
+                .take(22)
+                .collect();
             let headline = if rest.is_empty() {
                 format!("{name} failed")
             } else {
@@ -575,25 +587,43 @@ impl WyrmSnapshot {
             return (StatusLight::Red, format!("disk {:.0}% full", disk * 100.0));
         }
         if mem_left < 0.07 {
-            return (StatusLight::Red, format!("ram low: {} left", human_bytes(self.mem_avail)));
+            return (
+                StatusLight::Red,
+                format!("ram low: {} left", human_bytes(self.mem_avail)),
+            );
         }
         if swap > self.mem_total / 2 {
             return (StatusLight::Red, format!("swap {} hot", human_bytes(swap)));
         }
         if self.load5 > cores * 2.0 {
-            return (StatusLight::Red, format!("load {:.1} on {:.0}c", self.load5, cores));
+            return (
+                StatusLight::Red,
+                format!("load {:.1} on {:.0}c", self.load5, cores),
+            );
         }
         if disk > 0.82 {
-            return (StatusLight::Amber, format!("disk {:.0}% full", disk * 100.0));
+            return (
+                StatusLight::Amber,
+                format!("disk {:.0}% full", disk * 100.0),
+            );
         }
         if mem_left < 0.15 {
-            return (StatusLight::Amber, format!("ram {} left", human_bytes(self.mem_avail)));
+            return (
+                StatusLight::Amber,
+                format!("ram {} left", human_bytes(self.mem_avail)),
+            );
         }
         if swap > self.mem_total / 4 {
-            return (StatusLight::Amber, format!("swap {} in use", human_bytes(swap)));
+            return (
+                StatusLight::Amber,
+                format!("swap {} in use", human_bytes(swap)),
+            );
         }
         if self.load5 > cores {
-            return (StatusLight::Amber, format!("load {:.1} on {:.0}c", self.load5, cores));
+            return (
+                StatusLight::Amber,
+                format!("load {:.1} on {:.0}c", self.load5, cores),
+            );
         }
         (StatusLight::Green, "steady".to_owned())
     }
@@ -675,11 +705,16 @@ impl WyrmProbe {
 fn fetch_wyrm() -> Result<WyrmSnapshot, String> {
     let output = Command::new("/usr/bin/ssh")
         .args([
-            "-o", "BatchMode=yes",
-            "-o", "ConnectTimeout=10",
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-o", "ServerAliveInterval=5",
-            "-o", "ServerAliveCountMax=2",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            "-o",
+            "ServerAliveInterval=5",
+            "-o",
+            "ServerAliveCountMax=2",
             "-T",
             WYRM_TARGET,
             WYRM_PROBE_SCRIPT,
