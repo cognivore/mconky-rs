@@ -5,7 +5,8 @@ use std::collections::HashSet;
 const MAX_LAYOUT_DEPTH: usize = 32;
 const MAX_LAYOUT_NODES: usize = 256;
 
-/// A native presentation surface kind. A plan may contain at most one of each.
+/// A native presentation surface kind. A plan may contain any number of
+/// desktop surfaces and at most one of each widget-family kind.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceKind {

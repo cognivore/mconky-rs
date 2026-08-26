@@ -11,7 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var configWatcher: ConfigFileWatcher?
     private var configURLCancellable: AnyCancellable?
     private var planCancellable: AnyCancellable?
-    private var desktopPanelController: DashboardPanelController?
+    private var desktopPanelControllers: [DashboardPanelController] = []
     private var awaitingTerminationReply = false
 
     override init() {
@@ -58,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 watcher?.watch(url)
             }
         planCancellable = model.$plan.sink { [weak self] plan in
-            self?.updateDesktopSurface(plan)
+            self?.updateDesktopSurfaces(plan)
         }
         supervisor.start()
     }
@@ -147,16 +147,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func updateDesktopSurface(_ plan: DashboardPlan?) {
-        guard let surface = plan?.surfaces.first(where: { $0.kind == .desktop }) else {
-            desktopPanelController?.hide()
-            desktopPanelController = nil
-            return
+    // Panels are matched to desktop surfaces by position in the plan, so a
+    // reload reuses existing panels instead of flickering through teardown.
+    private func updateDesktopSurfaces(_ plan: DashboardPlan?) {
+        let surfaces = plan?.surfaces.filter { $0.kind == .desktop } ?? []
+        while desktopPanelControllers.count > surfaces.count {
+            desktopPanelControllers.removeLast().hide()
         }
-        if let desktopPanelController {
-            desktopPanelController.update(surface: surface)
-        } else {
-            desktopPanelController = DashboardPanelController(model: model, surface: surface)
+        for (index, surface) in surfaces.enumerated() {
+            if index < desktopPanelControllers.count {
+                desktopPanelControllers[index].update(surface: surface)
+            } else {
+                desktopPanelControllers.append(
+                    DashboardPanelController(model: model, surface: surface)
+                )
+            }
         }
     }
 }

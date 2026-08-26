@@ -12,7 +12,7 @@ use crate::system::{
 use crate::widget::Section;
 use crate::{
     MAX_PROTOCOL_RECORD_BYTES, Metric, MetricId, PROTOCOL_MAJOR, PROTOCOL_MINOR, SDK_VERSION,
-    Surface, WireType,
+    Surface, SurfaceKind, WireType,
 };
 use serde::Serialize;
 use std::any::Any;
@@ -400,9 +400,11 @@ impl App {
                 }
             }
         }
+        // Any number of desktop overlays may coexist — each becomes its own
+        // panel — while every widget-family kind maps to a single native slot.
         let mut surface_kinds = HashSet::with_capacity(self.surfaces.len());
         for surface in &self.surfaces {
-            if !surface_kinds.insert(surface.kind()) {
+            if surface.kind() != SurfaceKind::Desktop && !surface_kinds.insert(surface.kind()) {
                 return Err(ConfigError::InvalidLayout(format!(
                     "surface kind {:?} is duplicated",
                     surface.kind()
@@ -806,6 +808,23 @@ mod tests {
             Surface::widget_small(root),
         ]);
         assert!(matches!(app.validate(), Err(ConfigError::InvalidLayout(_))));
+    }
+
+    #[test]
+    fn multiple_desktop_surfaces_are_valid() {
+        let mut app = App::new("Surfaces");
+        let cpu = app
+            .metric::<Ratio>("cpu", schedule(), || Ok(0.5))
+            .unwrap();
+        let root = LayoutNode::widget(Stat::new("CPU", cpu).percent());
+        app.set_surfaces(vec![
+            Surface::desktop(root.clone()),
+            Surface::desktop(root.clone())
+                .position(24.0, 24.0, crate::SurfaceOrigin::BottomRight)
+                .width(320.0),
+            Surface::widget_small(root),
+        ]);
+        assert!(app.validate().is_ok());
     }
 
     #[test]

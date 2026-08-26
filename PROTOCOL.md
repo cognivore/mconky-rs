@@ -25,6 +25,10 @@ that corner, so the origin controls both `(0, 0)` placement and axis direction.
 The desktop `content_inset` is uniform space between the panel edge and its root
 layout.
 
+A plan may contain any number of desktop surfaces — the app presents one panel
+per desktop surface, in plan order. Each widget-family surface kind may appear
+at most once.
+
 Updates contain typed values or explicit collection errors:
 
 ```json

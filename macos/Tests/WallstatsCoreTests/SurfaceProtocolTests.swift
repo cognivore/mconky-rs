@@ -86,6 +86,39 @@ struct SurfaceProtocolTests {
         }
     }
 
+    @Test("Multiple desktop surfaces validate while widget kinds stay unique")
+    func multipleDesktopSurfaces() throws {
+        let metric = MetricDefinition(id: "cpu", valueType: .ratio, staleAfterMS: 1_000)
+        let leaf = LayoutNode.widget(WidgetPlan(
+            kind: .value,
+            label: "CPU",
+            metric: "cpu",
+            format: .percent
+        ))
+        func desktop(x: Double) -> SurfacePlan {
+            SurfacePlan(
+                kind: .desktop,
+                root: leaf,
+                x: x,
+                y: 32,
+                origin: .bottomRight,
+                width: 340,
+                contentInset: 14,
+                backgroundOpacity: 0.12,
+                clickThrough: true
+            )
+        }
+        let plan = DashboardPlan(
+            title: "fleet",
+            metrics: [metric],
+            window: testWindow(),
+            sections: [],
+            surfaces: [desktop(x: 32), desktop(x: 400), SurfacePlan(kind: .widgetSmall, root: leaf)]
+        )
+
+        try ProtocolValidator.validate(plan)
+    }
+
     @Test("Surface validation enforces depth and node limits")
     func depthAndNodeLimits() {
         let metric = MetricDefinition(id: "cpu", valueType: .ratio, staleAfterMS: 1_000)

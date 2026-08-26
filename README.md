@@ -38,10 +38,13 @@ The collector remains out of process. A bad plugin can fail collection without
 corrupting the native renderer, and configuration reload replaces the process.
 The wire contract is documented in [PROTOCOL.md](PROTOCOL.md).
 
-The Rust config may independently provide up to four optional surfaces:
-`desktop`, `widget_large`, `widget_medium`, and `widget_small`. Each has its own
-root, so a small widget is not a lossy resize of the desktop or large-widget
-tree. Missing kinds are simply disabled.
+The Rust config may independently provide surfaces of four kinds: `desktop`,
+`widget_large`, `widget_medium`, and `widget_small`. Each has its own root, so a
+small widget is not a lossy resize of the desktop or large-widget tree. Missing
+kinds are simply disabled. Any number of desktop surfaces may coexist — the app
+presents one panel per desktop surface, in plan order (the example pairs the
+local overlay with a slow remote server watch) — while each widget-family kind
+appears at most once.
 
 Every root is a StickyWM-style immutable layout AST made from `stack`, `section`,
 `flow`, `split`, and `widget` nodes. The native solver is width-first: it derives

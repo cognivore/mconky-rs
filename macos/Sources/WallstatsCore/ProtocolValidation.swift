@@ -108,9 +108,11 @@ public enum ProtocolValidator {
             }
         }
 
+        // Desktop surfaces may repeat — each is rendered as its own panel.
+        // Widget-family kinds map to single native slots and stay unique.
         var surfaceKinds: Set<SurfaceKind> = []
         for surface in plan.surfaces {
-            guard surfaceKinds.insert(surface.kind).inserted else {
+            guard surface.kind == .desktop || surfaceKinds.insert(surface.kind).inserted else {
                 throw ProtocolValidationError.invalidSurface(
                     "surface kind \(surface.kind.rawValue) appears more than once"
                 )
