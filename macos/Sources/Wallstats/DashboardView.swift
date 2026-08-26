@@ -119,7 +119,7 @@ struct DashboardView: View {
             Color(red: 0.35, green: 0.88, blue: 0.64)
         case .failed:
             Color(red: 1, green: 0.36, blue: 0.31)
-        case .starting, .waitingForPlan, .reloading, .resolving:
+        case .starting, .waitingForPlan, .reloading, .retrying, .resolving:
             Color(red: 1, green: 0.72, blue: 0.26)
         case .idle:
             Color.white.opacity(0.35)

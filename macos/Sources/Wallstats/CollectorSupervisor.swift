@@ -22,6 +22,10 @@ final class CollectorSupervisor {
     private var stderrPipe: Pipe?
     private var stdoutReader: DedicatedLineReader?
     private var stderrReader: DedicatedLineReader?
+    private var retryPolicy = CollectorRetryPolicy()
+    private var retryTask: Task<Void, Never>?
+    private var launchedAt: ContinuousClock.Instant?
+    private let clock = ContinuousClock()
     private var terminationWaitTask: Task<Void, Never>?
     private var drainDeadlineTask: Task<Void, Never>?
     private var forceKillTask: Task<Void, Never>?
@@ -49,6 +53,7 @@ final class CollectorSupervisor {
 
     func start() {
         guard process == nil, !shuttingDown else { return }
+        cancelPendingRetry()
         model.beginResolution()
 
         if let error = options.error {
@@ -81,6 +86,9 @@ final class CollectorSupervisor {
 
     func requestReload() {
         guard !shuttingDown else { return }
+        // A reload is a deliberate act — the configuration or environment
+        // presumably changed — so the automatic-restart budget starts over.
+        retryPolicy.reset()
         guard let process else {
             start()
             return
@@ -93,7 +101,7 @@ final class CollectorSupervisor {
         case .reloading:
             // The pending launch will read the newest config after this process exits.
             return
-        case .idle, .running, .failed:
+        case .idle, .running, .retrying, .failed:
             break
         }
 
@@ -111,6 +119,7 @@ final class CollectorSupervisor {
     }
 
     func prepareForApplicationTermination(completion: @escaping () -> Void) -> Bool {
+        cancelPendingRetry()
         guard let process else { return false }
 
         shuttingDown = true
@@ -128,6 +137,7 @@ final class CollectorSupervisor {
         shuttingDown = true
         restartAfterTermination = false
         acceptingOutput = false
+        cancelPendingRetry()
         stdoutReader?.cancel()
         stderrReader?.cancel()
         guard let process, process.isRunning else { return }
@@ -178,6 +188,7 @@ final class CollectorSupervisor {
 
         do {
             try process.run()
+            launchedAt = clock.now
             try? stdoutPipe.fileHandleForWriting.close()
             try? stderrPipe.fileHandleForWriting.close()
             let stdoutReader = makeReader(
@@ -364,8 +375,43 @@ final class CollectorSupervisor {
             shutdownCompletion = nil
             completion?()
         } else {
-            model.collectorExited(status: status, signaled: signaled)
+            scheduleRetryOrFail(status: status, signaled: signaled)
         }
+    }
+
+    // An unexpected exit relaunches on a backoff ladder before giving up: a
+    // collector started at login can race the Nix store mount and die within
+    // milliseconds, and without a retry the app would sit failed until a
+    // manual reload.
+    private func scheduleRetryOrFail(status: Int32, signaled: Bool) {
+        let uptime = launchedAt.map { clock.now - $0 }
+        launchedAt = nil
+        guard let delay = retryPolicy.nextDelay(uptime: uptime) else {
+            model.collectorExited(status: status, signaled: signaled)
+            return
+        }
+        model.collectorWillRestart(
+            status: status,
+            signaled: signaled,
+            attempt: retryPolicy.attempt,
+            attemptsAllowed: retryPolicy.attemptsAllowed,
+            delay: delay
+        )
+        retryTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: delay)
+            } catch {
+                return
+            }
+            guard let self, !shuttingDown, process == nil else { return }
+            retryTask = nil
+            start()
+        }
+    }
+
+    private func cancelPendingRetry() {
+        retryTask?.cancel()
+        retryTask = nil
     }
 
     private func schedulePostTerminationDrainDeadline(

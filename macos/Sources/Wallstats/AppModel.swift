@@ -9,6 +9,7 @@ enum ConnectionPhase: String, Equatable {
     case waitingForPlan = "Waiting for plan"
     case running = "Live"
     case reloading = "Reloading"
+    case retrying = "Restarting collector"
     case failed = "Attention required"
 }
 
@@ -173,10 +174,25 @@ final class AppModel: ObservableObject {
         appendDiagnostic(level: .error, message: message)
     }
 
+    func collectorWillRestart(
+        status: Int32,
+        signaled: Bool,
+        attempt: Int,
+        attemptsAllowed: Int,
+        delay: Duration
+    ) {
+        let reason = signaled ? "after receiving a signal" : "with status \(status)"
+        phase = .retrying
+        statusDetail = "Collector exited \(reason). Restarting in \(delay.components.seconds)s"
+            + " (attempt \(attempt) of \(attemptsAllowed))."
+        appendDiagnostic(level: .warning, message: statusDetail)
+    }
+
     func collectorExited(status: Int32, signaled: Bool) {
         guard phase != .failed else { return }
         let reason = signaled ? "after receiving a signal" : "with status \(status)"
-        fail("Collector exited \(reason). Choose Reload Configuration after correcting the issue.")
+        fail("Collector exited \(reason) and automatic restarts did not recover."
+            + " Choose Reload Configuration after correcting the issue.")
     }
 
     func appendDiagnostic(level: DiagnosticLevel, message: String) {
