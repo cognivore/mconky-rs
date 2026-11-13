@@ -227,8 +227,8 @@ if /usr/bin/grep -En \
 fi
 editorial_text_count="$(/usr/bin/grep -Ec \
     '(^|[^[:alnum:]_])Text[[:space:]]*\(' "$editorial_renderer_source")"
-if [[ "$editorial_text_count" -ne 14 ]]; then
-    echo "check: EditorialSurfaceView.swift must contain exactly 14 Text calls" >&2
+if [[ "$editorial_text_count" -ne 15 ]]; then
+    echo "check: EditorialSurfaceView.swift must contain exactly 15 Text calls" >&2
     exit 1
 fi
 if /usr/bin/grep -Ein '"[^"]*(version|protocol|header|footer)[^"]*"' \

@@ -69,6 +69,12 @@ impl Schedule {
             ConfigError::InvalidSchedule("stale-after duration exceeds i64 milliseconds".to_owned())
         })
     }
+
+    fn interval_ms(&self) -> std::result::Result<i64, ConfigError> {
+        i64::try_from(self.interval.as_millis()).map_err(|_| {
+            ConfigError::InvalidSchedule("collection interval exceeds i64 milliseconds".to_owned())
+        })
+    }
 }
 
 fn validate_duration(duration: Duration, name: &str) -> std::result::Result<(), ConfigError> {
@@ -202,6 +208,7 @@ struct MetricDefinition {
     id: MetricId,
     value_type: &'static str,
     stale_after_ms: i64,
+    sample_interval_ms: i64,
 }
 
 /// A complete Wallstats configuration and collector runtime.
@@ -261,6 +268,7 @@ impl App {
             id: id.clone(),
             value_type: T::VALUE_TYPE,
             stale_after_ms,
+            sample_interval_ms: schedule.interval_ms()?,
         });
         self.sources.push(Box::new(SingleMetricSource::<T, _>::new(
             id,
@@ -292,6 +300,7 @@ impl App {
                 id: id.clone(),
                 value_type,
                 stale_after_ms,
+                sample_interval_ms: settings.schedule_value().interval_ms()?,
             });
         }
         let handles = ids.handles();
@@ -316,6 +325,7 @@ impl App {
                 id: id.clone(),
                 value_type,
                 stale_after_ms,
+                sample_interval_ms: settings.schedule_value().interval_ms()?,
             });
         }
         let handles = ids.handles();
@@ -340,6 +350,7 @@ impl App {
                 id: id.clone(),
                 value_type,
                 stale_after_ms,
+                sample_interval_ms: settings.schedule_value().interval_ms()?,
             });
         }
         let handles = ids.handles();
@@ -851,6 +862,10 @@ mod tests {
         assert_eq!(records[0]["type"], "hello");
         assert_eq!(records[0]["protocol_major"], 1);
         assert_eq!(records[1]["type"], "plan");
+        assert_eq!(
+            records[1]["metrics"][0]["sample_interval_ms"],
+            schedule().interval().as_millis() as u64
+        );
         assert_eq!(records[2]["type"], "update");
         assert_eq!(records[2]["sequence"], 1);
         assert_eq!(

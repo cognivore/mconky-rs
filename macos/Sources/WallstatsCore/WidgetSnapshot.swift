@@ -137,6 +137,8 @@ public struct WidgetRenderMetric: Codable, Equatable, Sendable {
     public let error: String?
     public let timestampMS: Int64?
     public let history: [Double]
+    public let historyTimestampsMS: [Int64]?
+    public let sampleIntervalMS: Int64?
 
     public init(
         metricID: String,
@@ -144,7 +146,9 @@ public struct WidgetRenderMetric: Codable, Equatable, Sendable {
         value: TypedMetricValue?,
         error: String?,
         timestampMS: Int64?,
-        history: [Double]
+        history: [Double],
+        historyTimestampsMS: [Int64]? = nil,
+        sampleIntervalMS: Int64? = nil
     ) {
         self.metricID = metricID
         self.valueType = valueType
@@ -152,6 +156,8 @@ public struct WidgetRenderMetric: Codable, Equatable, Sendable {
         self.error = error
         self.timestampMS = timestampMS
         self.history = history
+        self.historyTimestampsMS = historyTimestampsMS
+        self.sampleIntervalMS = sampleIntervalMS
     }
 
     enum CodingKeys: String, CodingKey {
@@ -161,6 +167,8 @@ public struct WidgetRenderMetric: Codable, Equatable, Sendable {
         case error = "e"
         case timestampMS = "t"
         case history = "h"
+        case historyTimestampsMS = "ht"
+        case sampleIntervalMS = "si"
     }
 }
 
@@ -306,6 +314,15 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             guard metric.history.allSatisfy(\.isFinite) else {
                 throw WidgetSnapshotValidationError.invalidValue("metric history")
             }
+            if let timestamps = metric.historyTimestampsMS {
+                guard timestamps.count == metric.history.count,
+                      timestamps.allSatisfy({ $0 >= 0 }),
+                      zip(timestamps, timestamps.dropFirst()).allSatisfy({ $0 < $1 })
+                else { throw WidgetSnapshotValidationError.invalidValue("history timestamps") }
+            }
+            if let interval = metric.sampleIntervalMS, interval <= 0 {
+                throw WidgetSnapshotValidationError.invalidValue("sample interval")
+            }
             if let value = metric.value {
                 guard value.kind == metric.valueType else {
                     throw WidgetSnapshotValidationError.invalidValue("metric value type")
@@ -446,7 +463,9 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
                 value: boundedValue(snapshot.value),
                 error: snapshot.error.map { String($0.prefix(256)) },
                 timestampMS: snapshot.timestampMS,
-                history: dashboard.history(for: metricID, limit: historyLimit).map(\.value)
+                history: dashboard.history(for: metricID, limit: historyLimit).map(\.value),
+                historyTimestampsMS: dashboard.history(for: metricID, limit: historyLimit).map(\.timestampMS),
+                sampleIntervalMS: definition.sampleIntervalMS
             )
         }
     }

@@ -12,12 +12,19 @@ Rust runtime and native decoder enforce this limit.
 The first two records are `hello` and `plan`:
 
 ```json
-{"type":"hello","protocol_major":1,"protocol_minor":2,"sdk_version":"0.1.0"}
+{"type":"hello","protocol_major":1,"protocol_minor":3,"sdk_version":"0.1.0"}
 {"type":"plan","title":"My Mac","metrics":[{"id":"cpu.total","value_type":"ratio","stale_after_ms":3000}],"window":{"width":420,"anchor":"top_right","margin":20,"layer":"desktop","opacity":0.94},"sections":[{"title":"Performance","widgets":[{"kind":"sparkline","label":"CPU","metric":"cpu.total","format":"percent","accent":"cyan","history":60}]}]}
 ```
 
 `plan` is immutable for the lifetime of a child. Configuration reload replaces
 the child process.
+
+Metric definitions may also include a positive `sample_interval_ms`, the
+collector's actual cadence. Histories retain each observation's `timestamp_ms`;
+plots share a wall-clock axis spanning `history × sample_interval_ms`. Missing
+observations leave gaps. Multiple observations within one cadence bucket replace
+that bucket's last sample, so manual reloads do not evict hours of history.
+Older collectors without cadence metadata remain supported.
 
 Desktop surfaces include an `origin` of `bottom_left`, `top_left`,
 `bottom_right`, or `top_right`. Their `x` and `y` values are inward offsets from

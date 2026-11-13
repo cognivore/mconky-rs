@@ -180,7 +180,7 @@ private struct SurfaceWidgetLeaf: View {
                     metric: widget.metric,
                     accent: widget.accent,
                     format: widget.format
-                )])
+                )], capacity: widget.history ?? 60, date: date, showsTimeAxis: false)
             }
         case .plot:
             let plotSeries = widget.series.map {
@@ -195,7 +195,7 @@ private struct SurfaceWidgetLeaf: View {
                         .lineLimit(1)
                 }
                 SurfacePlotLegend(series: plotSeries)
-                SurfacePlot(series: plotSeries)
+                SurfacePlot(series: plotSeries, capacity: widget.history ?? 60, date: date, showsTimeAxis: true)
             }
         case .compactStatus:
             SurfaceCompactStatus(
@@ -241,11 +241,13 @@ private struct SurfaceWidgetLeaf: View {
     }
 
     private func series(metric: String, accent: String?, format: MetricFormat) -> SurfacePlotSeries {
-        guard let state = states[metric], state.error == nil else {
+        guard let state = states[metric] else {
             return SurfacePlotSeries(
                 label: SurfaceMetricLabel.compact(metric),
                 currentValue: "--",
                 samples: [],
+                timestampsMS: [],
+                intervalMS: nil,
                 valueType: .number,
                 format: format,
                 color: SurfacePalette.accent(accent)
@@ -253,10 +255,14 @@ private struct SurfaceWidgetLeaf: View {
         }
         return SurfacePlotSeries(
             label: SurfaceMetricLabel.compact(metric),
-            currentValue: WidgetValueFormatter.string(for: state.value, format: format),
+            currentValue: state.error == nil
+                ? WidgetValueFormatter.string(for: state.value, format: format) : "--",
             samples: state.history.isEmpty
-                ? state.value?.numericValue.map { [$0] } ?? []
+                ? (state.error == nil ? state.value?.numericValue.map { [$0] } ?? [] : [])
                 : state.history,
+            timestampsMS: state.history.isEmpty
+                ? state.timestampMS.map { [$0] } ?? [] : state.historyTimestampsMS ?? [],
+            intervalMS: state.sampleIntervalMS,
             valueType: state.valueType,
             format: format,
             color: SurfacePalette.accent(accent)
@@ -287,6 +293,8 @@ private struct SurfacePlotSeries {
     let label: String
     let currentValue: String
     let samples: [Double]
+    let timestampsMS: [Int64]
+    let intervalMS: Int64?
     let valueType: MetricValueType
     let format: MetricFormat
     let color: Color
@@ -331,16 +339,27 @@ private enum SurfaceMetricLabel {
 
 private struct SurfacePlot: View {
     let series: [SurfacePlotSeries]
+    let capacity: Int
+    let date: Date
+    let showsTimeAxis: Bool
 
     var body: some View {
         Canvas { context, size in
-            let scale = SurfacePlotScale(series: series)
+            let timestamps = series.flatMap(\.timestampsMS)
+            let timeline = timestamps.isEmpty ? nil : PlotTimeline(
+                timestamps: timestamps,
+                intervalsMS: series.compactMap(\.intervalMS),
+                capacity: capacity,
+                nowMS: Int64(date.timeIntervalSince1970 * 1_000)
+            )
+            let scale = SurfacePlotScale(series: series, timeline: timeline)
+            let axisHeight = showsTimeAxis && timeline != nil ? 14.0 : 0
             let scaleWidth = 48.0
             let rect = CGRect(
                 x: 3,
                 y: 3,
                 width: max(size.width - scaleWidth - 6, 0),
-                height: max(size.height - 6, 0)
+                height: max(size.height - 6 - axisHeight, 0)
             )
             guard rect.width > 0, rect.height > 0 else { return }
             for fraction in [0.25, 0.5, 0.75] as [CGFloat] {
@@ -351,9 +370,23 @@ private struct SurfacePlot: View {
                 context.stroke(grid, with: .color(SurfacePalette.grid), lineWidth: 0.5)
             }
             for (index, item) in series.enumerated() where !item.samples.isEmpty {
-                draw(item, index: index, rect: rect, scale: scale, context: &context)
+                draw(item, index: index, rect: rect, scale: scale, timeline: timeline, context: &context)
             }
-            drawScale(scale, size: size, context: &context)
+            drawScale(scale, size: CGSize(width: size.width, height: size.height - axisHeight), context: &context)
+            if showsTimeAxis, let timeline {
+                for (timestamp, x, anchor) in [
+                    (timeline.lowerMS, rect.minX, UnitPoint.bottomLeading),
+                    (timeline.upperMS, rect.maxX, UnitPoint.bottomTrailing),
+                ] {
+                    let label = Date(timeIntervalSince1970: timestamp / 1_000)
+                        .formatted(date: .omitted, time: .shortened)
+                    context.draw(
+                        Text(label).font(.system(size: 8, design: .monospaced))
+                            .foregroundStyle(SurfacePalette.secondary),
+                        at: CGPoint(x: x, y: size.height), anchor: anchor
+                    )
+                }
+            }
         }
     }
 
@@ -362,21 +395,42 @@ private struct SurfacePlot: View {
         index: Int,
         rect: CGRect,
         scale: SurfacePlotScale,
+        timeline: PlotTimeline?,
         context: inout GraphicsContext
     ) {
-        func point(_ sample: Int) -> CGPoint {
-            let x = item.samples.count == 1
-                ? rect.maxX
-                : rect.minX + CGFloat(sample) / CGFloat(item.samples.count - 1) * rect.width
+        let timed = timeline != nil && item.timestampsMS.count == item.samples.count
+        func point(_ sample: Int) -> CGPoint? {
+            let fraction: Double
+            if timed, let timeline {
+                guard let position = timeline.position(timestampMS: item.timestampsMS[sample]) else { return nil }
+                fraction = position
+            } else {
+                fraction = item.samples.count == 1 ? 1 : Double(sample) / Double(item.samples.count - 1)
+            }
             return CGPoint(
-                x: x,
+                x: rect.minX + fraction * rect.width,
                 y: rect.maxY - CGFloat(scale.normalize(item.samples[sample])) * rect.height
             )
         }
         var path = Path()
-        path.move(to: point(0))
-        for sample in item.samples.indices.dropFirst() {
-            path.addLine(to: point(sample))
+        var previous: Int?
+        var endpoint: CGPoint?
+        for sample in item.samples.indices {
+            guard let current = point(sample) else { previous = nil; continue }
+            let connected = previous.map { earlier in
+                !timed || PlotTimeline.connects(
+                    from: item.timestampsMS[earlier], to: item.timestampsMS[sample], intervalMS: item.intervalMS
+                )
+            } ?? false
+            if connected { path.addLine(to: current) } else { path.move(to: current) }
+            if !connected {
+                context.fill(
+                    Path(ellipseIn: CGRect(x: current.x - 1.5, y: current.y - 1.5, width: 3, height: 3)),
+                    with: .color(item.color)
+                )
+            }
+            previous = sample
+            endpoint = current
         }
         let dash: [CGFloat] = index % 3 == 1 ? [4, 2] : (index % 3 == 2 ? [1, 2] : [])
         context.stroke(
@@ -384,7 +438,7 @@ private struct SurfacePlot: View {
             with: .color(item.color.opacity(0.82)),
             style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round, dash: dash)
         )
-        let endpoint = point(item.samples.count - 1)
+        guard let endpoint else { return }
         context.fill(
             Path(ellipseIn: CGRect(x: endpoint.x - 2, y: endpoint.y - 2, width: 4, height: 4)),
             with: .color(item.color)
@@ -417,8 +471,13 @@ private struct SurfacePlotScale {
     let valueType: MetricValueType
     let format: MetricFormat
 
-    init(series: [SurfacePlotSeries]) {
-        let samples = series.flatMap(\.samples)
+    init(series: [SurfacePlotSeries], timeline: PlotTimeline?) {
+        let samples = series.flatMap { item -> [Double] in
+            guard let timeline, item.timestampsMS.count == item.samples.count else { return item.samples }
+            return zip(item.timestampsMS, item.samples).compactMap { timestamp, value in
+                timeline.position(timestampMS: timestamp) == nil ? nil : value
+            }
+        }
         valueType = series.first?.valueType ?? .number
         format = series.first?.format ?? .number
         if !series.isEmpty, series.allSatisfy({ $0.valueType == .ratio }) {

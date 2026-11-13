@@ -7,6 +7,7 @@ public enum ProtocolValidationError: Error, Equatable, Sendable {
     case invalidMetricID(String)
     case duplicateMetricID(String)
     case invalidStaleInterval(metric: String)
+    case invalidSampleInterval(metric: String)
     case invalidWindow(field: String, reason: String)
     case unknownMetricReference(String)
     case invalidHistory(metric: String)
@@ -36,6 +37,8 @@ extension ProtocolValidationError: LocalizedError {
             "Duplicate metric ID '\(id)'."
         case let .invalidStaleInterval(metric):
             "Metric '\(metric)' must have a positive stale_after_ms."
+        case let .invalidSampleInterval(metric):
+            "Metric '\(metric)' must have a positive sample_interval_ms."
         case let .invalidWindow(field, reason):
             "Invalid window \(field): \(reason)."
         case let .unknownMetricReference(metric):
@@ -94,6 +97,9 @@ public enum ProtocolValidator {
             }
             guard metric.staleAfterMS > 0 else {
                 throw ProtocolValidationError.invalidStaleInterval(metric: metric.id)
+            }
+            if let interval = metric.sampleIntervalMS, interval <= 0 {
+                throw ProtocolValidationError.invalidSampleInterval(metric: metric.id)
             }
         }
 

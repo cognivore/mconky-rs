@@ -48,7 +48,7 @@ pub use widget::{
 pub const PROTOCOL_MAJOR: u32 = 1;
 
 /// The protocol minor version emitted by this crate.
-pub const PROTOCOL_MINOR: u32 = 2;
+pub const PROTOCOL_MINOR: u32 = 3;
 
 /// The SDK version reported in the protocol `hello` record.
 pub const SDK_VERSION: &str = env!("CARGO_PKG_VERSION");

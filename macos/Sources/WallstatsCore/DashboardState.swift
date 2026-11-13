@@ -1,6 +1,6 @@
 import Foundation
 
-public struct HistorySample: Equatable, Sendable {
+public struct HistorySample: Codable, Equatable, Sendable {
     public let timestampMS: Int64
     public let value: Double
 
@@ -32,6 +32,7 @@ public struct DashboardState: Equatable, Sendable {
     public private(set) var histories: [String: [HistorySample]]
 
     private let historyLimits: [String: Int]
+    private let historyIntervals: [String: Int64]
 
     public init(plan: DashboardPlan) throws {
         try ProtocolValidator.validate(plan)
@@ -51,6 +52,9 @@ public struct DashboardState: Equatable, Sendable {
             }
         }
         historyLimits = limits
+        historyIntervals = Dictionary(uniqueKeysWithValues: plan.metrics.compactMap { metric in
+            metric.sampleIntervalMS.map { (metric.id, $0) }
+        })
         histories = Dictionary(uniqueKeysWithValues: limits.keys.map { ($0, []) })
     }
 
@@ -72,7 +76,23 @@ public struct DashboardState: Equatable, Sendable {
                    let limit = historyLimits[item.metric]
                 {
                     var samples = histories[item.metric, default: []]
-                    samples.append(HistorySample(timestampMS: update.timestampMS, value: numericValue))
+                    let sample = HistorySample(timestampMS: update.timestampMS, value: numericValue)
+                    if let last = samples.last, update.timestampMS < last.timestampMS {
+                        // Clock rollback must not disorder a time series.
+                        samples.removeAll { $0.timestampMS >= update.timestampMS }
+                    }
+                    if let last = samples.last,
+                       last.timestampMS == update.timestampMS
+                        || historyIntervals[item.metric].map({
+                            last.timestampMS / $0 == update.timestampMS / $0
+                        }) == true
+                    {
+                        // Reloading a slow collector must not consume its entire
+                        // history capacity with duplicate samples in one interval.
+                        samples[samples.count - 1] = sample
+                    } else {
+                        samples.append(sample)
+                    }
                     if samples.count > limit {
                         samples.removeFirst(samples.count - limit)
                     }
@@ -99,6 +119,25 @@ public struct DashboardState: Equatable, Sendable {
         let samples = histories[metric] ?? []
         guard let limit, limit >= 0, samples.count > limit else { return samples }
         return Array(samples.suffix(limit))
+    }
+
+    public var historyArchive: DashboardHistoryArchive {
+        let entries = plan.metrics.compactMap { definition -> (String, MetricHistoryArchive)? in
+            guard let samples = histories[definition.id], !samples.isEmpty else { return nil }
+            return (definition.id, MetricHistoryArchive(valueType: definition.valueType, samples: samples))
+        }
+        return DashboardHistoryArchive(metrics: Dictionary(uniqueKeysWithValues: entries))
+    }
+
+    public mutating func restoreHistory(_ archive: DashboardHistoryArchive) throws {
+        try archive.validate()
+        for definition in plan.metrics {
+            guard let limit = historyLimits[definition.id],
+                  let saved = archive.metrics[definition.id],
+                  saved.valueType == definition.valueType
+            else { continue }
+            histories[definition.id] = Array(saved.samples.suffix(limit))
+        }
     }
 
     private static func widgets(in node: LayoutNode) -> [WidgetPlan] {

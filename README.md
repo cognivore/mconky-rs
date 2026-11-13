@@ -67,6 +67,14 @@ status prose. Generic compact-status metrics render configured glyphs, a
 shape-and-color status mark, and age; other leaves render plan-driven values,
 gauges, plots, and tables.
 
+Graphs retain their bounded timestamped histories through configuration reloads,
+collector restarts, and app updates. They use actual observation times and a
+shared time axis; a short history occupies only its real portion of the window.
+History is stored per configuration under `~/.local/state/wallstats/history`,
+with atomic checkpoints at most once per minute and a final checkpoint on a
+graceful reload or shutdown. Each archive is limited to 4 MiB. Values from before
+history storage was introduced cannot be reconstructed.
+
 - Cyan: CPU activity
 - Blue: GPU activity
 - Amber: disk reads

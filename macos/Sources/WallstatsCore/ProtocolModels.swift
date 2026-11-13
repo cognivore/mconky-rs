@@ -77,17 +77,20 @@ public struct MetricDefinition: Codable, Equatable, Sendable {
     public let id: String
     public let valueType: MetricValueType
     public let staleAfterMS: Int64
+    public let sampleIntervalMS: Int64?
 
-    public init(id: String, valueType: MetricValueType, staleAfterMS: Int64) {
+    public init(id: String, valueType: MetricValueType, staleAfterMS: Int64, sampleIntervalMS: Int64? = nil) {
         self.id = id
         self.valueType = valueType
         self.staleAfterMS = staleAfterMS
+        self.sampleIntervalMS = sampleIntervalMS
     }
 
     enum CodingKeys: String, CodingKey {
         case id
         case valueType = "value_type"
         case staleAfterMS = "stale_after_ms"
+        case sampleIntervalMS = "sample_interval_ms"
     }
 }
 

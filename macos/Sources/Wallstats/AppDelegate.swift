@@ -15,7 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var awaitingTerminationReply = false
 
     override init() {
-        model = AppModel(widgetSnapshotPublisher: WidgetSnapshotPublisher())
+        model = AppModel(
+            widgetSnapshotPublisher: WidgetSnapshotPublisher(),
+            historyStore: DashboardHistoryStore()
+        )
         timelineRefreshRequester = WidgetTimelineRefreshRequester(
             reloader: SystemWidgetTimelineReloader()
         )
@@ -70,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        model.flushHistory()
         configWatcher?.stop()
         supervisor?.terminateImmediatelyIfNeeded()
     }

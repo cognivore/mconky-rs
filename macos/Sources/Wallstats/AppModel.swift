@@ -59,9 +59,18 @@ final class AppModel: ObservableObject {
     private var forceNextWidgetSnapshot = false
     private var forcedWidgetPublicationInFlight = false
     private var forceRequestedDuringPublication = false
+    private let historyStore: (any DashboardHistoryStoring)?
+    private var retainedHistory: DashboardHistoryArchive?
+    private var retainedHistoryConfigURL: URL?
+    private var lastHistoryWriteMS: Int64?
+    private var historyFailure: String?
 
-    init(widgetSnapshotPublisher: (any WidgetSnapshotPublishing)? = nil) {
+    init(
+        widgetSnapshotPublisher: (any WidgetSnapshotPublishing)? = nil,
+        historyStore: (any DashboardHistoryStoring)? = nil
+    ) {
         self.widgetSnapshotPublisher = widgetSnapshotPublisher
+        self.historyStore = historyStore
     }
 
     var windowPresentation: AppWindowPresentation {
@@ -83,6 +92,7 @@ final class AppModel: ObservableObject {
     }
 
     func beginResolution() {
+        flushHistory()
         phase = .resolving
         statusDetail = "Resolving rust-script and the configuration path."
         fatalMessage = nil
@@ -98,6 +108,12 @@ final class AppModel: ObservableObject {
     }
 
     func beginLaunch(configURL: URL) {
+        flushHistory()
+        if self.configURL != configURL {
+            retainedHistory = nil
+            retainedHistoryConfigURL = nil
+            lastHistoryWriteMS = nil
+        }
         self.configURL = configURL
         phase = .starting
         statusDetail = "Launching \(configURL.lastPathComponent)."
@@ -136,7 +152,17 @@ final class AppModel: ObservableObject {
 
         case let .plan(plan):
             self.plan = plan
-            dashboard = try DashboardState(plan: plan)
+            var next = try DashboardState(plan: plan)
+            do {
+                let saved = try dashboard?.historyArchive
+                    ?? (retainedHistoryConfigURL == configURL ? retainedHistory : nil)
+                    ?? configURL.flatMap { try historyStore?.read(configURL: $0) }
+                if let saved { try next.restoreHistory(saved) }
+            } catch {
+                reportHistoryFailure(error)
+            }
+            dashboard = next
+            retainedHistory = nil
             submittedInitialWidgetSnapshot = false
             phase = .running
             statusDetail = "Receiving metrics from \(configURL?.lastPathComponent ?? "collector")."
@@ -147,6 +173,7 @@ final class AppModel: ObservableObject {
             }
             try dashboard.apply(update)
             self.dashboard = dashboard
+            persistHistory(at: update.timestampMS)
             phase = .running
             if submittedInitialWidgetSnapshot {
                 _ = publishWidgetSnapshot(dashboard, timestampMS: update.timestampMS)
@@ -172,6 +199,36 @@ final class AppModel: ObservableObject {
         phase = .failed
         statusDetail = message
         appendDiagnostic(level: .error, message: message)
+    }
+
+    func flushHistory() {
+        guard let dashboard else { return }
+        retainedHistory = dashboard.historyArchive
+        retainedHistoryConfigURL = configURL
+        persistHistory(at: dashboard.metrics.values.compactMap(\.timestampMS).max() ?? 0, force: true)
+    }
+
+    private func persistHistory(at timestampMS: Int64, force: Bool = false) {
+        guard let historyStore, let configURL, let dashboard,
+              !dashboard.histories.values.allSatisfy(\.isEmpty)
+        else { return }
+        if !force, let previous = lastHistoryWriteMS,
+           timestampMS >= previous, timestampMS - previous < 60_000
+        { return }
+        lastHistoryWriteMS = timestampMS
+        do {
+            try historyStore.write(dashboard.historyArchive, configURL: configURL)
+            historyFailure = nil
+        } catch {
+            reportHistoryFailure(error)
+        }
+    }
+
+    private func reportHistoryFailure(_ error: Error) {
+        let message = "Graph history: \(error.localizedDescription)"
+        guard historyFailure != message else { return }
+        historyFailure = message
+        appendDiagnostic(level: .warning, message: message)
     }
 
     func collectorWillRestart(
